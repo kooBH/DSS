@@ -32,7 +32,6 @@ pos_traj[:,0] = np.linspace(0.1, 7.9, traj_pts) # Positions of the trajectory po
 
 print("pos_traj : " + str(pos_traj.shape))
 
-
 nb_rcv = 2 # Number of receivers
 pos_rcv = np.array([[4.00,1.0,1.5],[4.3,1.0,1.5]])	 # Position of the receivers [m]
 
@@ -81,5 +80,7 @@ tic = time.time()
 filtered_signal = gpuRIR.simulateTrajectory(source_signal, RIRs.astype(np.float32))
 filtered_signal = filtered_signal/np.max(np.abs(filtered_signal))
 print("filter applied : " + str(time.time()-tic)+ "sec" )
+
+print(filtered_signal.shape)
 
 wavfile.write('filtered_signal.wav', fs, filtered_signal)
