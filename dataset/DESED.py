@@ -34,13 +34,19 @@ n_output = args.n_output
 target_list = [x for x in glob.glob(os.path.join(root,'**','*.wav'),recursive=True)]
 print("Target Files : {}".format(len(target_list)))
 
+## Gen List, 
+# currently, np.random seed is fixed in MP
+
+list_sources = []
+for i in range(n_output):
+    n_source = np.random.randint(low=1,high=5)
+    list_sources.append(np.random.choice(target_list,n_source))
+
 def process(idx):
     # gen random parameters
-    n_source = np.random.randint(low=1,high=4)
-
-    list_sources = np.random.choice(target_list,n_source)
-
-    generate(output_root,list_sources,idx,50,shift=256,match="4sec")
+    #n_source = np.random.randint(low=1,high=4)
+    #list_sources = np.random.choice(target_list,n_source)
+    generate(output_root,list_sources[idx],idx,50,shift=256,match="4sec")
 
 if __name__=='__main__': 
     cpu_num = cpu_count()
