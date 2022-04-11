@@ -67,7 +67,7 @@ AF : [N,C,F,T]
 """
 def AngleFeature(stft,angle,mic_pos,fs=16000):
     # F : n_hfft
-    C,F,T,_ = stft.shape 
+    C,F,T = stft.shape 
     N,_,_ = angle.shape
 
     ss = 340.3
@@ -80,6 +80,7 @@ def AngleFeature(stft,angle,mic_pos,fs=16000):
     d_angle[:,:,1] = torch.sin(angle[:,:,0]/180*pi)*torch.sin(angle[:,:,1]/180*pi)
     d_angle[:,:,2] = torch.cos(angle[:,:,1]/180*pi)
 
+    # 
     d_dist = mic_pos[0:1,:] - mic_pos[:,:]
 
     RDOA = torch.zeros(N,C,T)
@@ -87,16 +88,16 @@ def AngleFeature(stft,angle,mic_pos,fs=16000):
         RDOA[i,:,:] = torch.matmul(d_dist,d_angle[i,:,:].T) 
 
     ## steering vector
-    SV = torch.zeros(N,C,F,T)
+    SV = torch.zeros(N,C,F,T, dtype=torch.cfloat)
     for i in range(F):
         SV[:,:,i,:] = torch.exp(1j*2*pi*i/n_fft*RDOA*fs/ss)
 
     ## Angle Feature
-    AF = torch.zeros(N,C,F,T)
+    AF = torch.zeros(N,C,F,T, dtype=torch.cfloat)
     for i in range(N) : 
-        tmp_term =  steering_vector[i,:,:,:]*(stft[:,:,:]/stft[0:1,:,:])
+        tmp_term =  SV[i,:,:,:]*(stft[:,:,:]/stft[0:1,:,:])
         AF [i,:,:,:] = tmp_term/torch.abs(tmp_term)
-    AF = torch.sum(AnlgeFeature,axis=2)
+    AF = torch.sum(AF,axis=0)
 
     return AF
 

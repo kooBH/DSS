@@ -6,6 +6,8 @@ import torch.nn.functional as F
 import json
 import feature
 
+import pdb
+
 class DatasetDOA(torch.utils.data.Dataset):
     def __init__(self,path,IPD="IPD"):
         self.list_data = glob.glob(os.path.join(path,"*.wav"))
@@ -36,35 +38,45 @@ class DatasetDOA(torch.utils.data.Dataset):
         json_data = json.load(f_json)
 
         n_src = json_data["n_src"]
+        # pos_mic 
         pos_mic = torch.tensor(json_data["pos_mic"])
         azimuth = torch.tensor(json_data["azimuth"])
         elevation = torch.tensor(json_data["elevation"])
+
+        T = elevation.shape[1]
 
         raw,_ = librosa.load(self.list_data[idx],sr=16000,mono=False)        
 
         raw = torch.from_numpy(raw)
 
         ## input preprocessing
-        stft = torch.stft(raw,n_fft=1024)
-        LPS =  feature.LogPowerSpectral(stft)
+        # NOTE #1
+        # [:T] due to 1 frame mismatch. Maybe because of shift?
+        # need to check later.  
+        stft = torch.stft(raw,n_fft=1024,center=True,return_complex=True)[:,:,:T]
+        LPS =  feature.LogPowerSpectral(stft[0:1,:,:])
 
         # Using selected phase preprocessor
         phase = self.phase(stft)
 
         # Angle feature
-        angle =  torch.stack((azimuth,elevation))
-        print(angle.shape)
+        angle =  torch.stack((azimuth,elevation),-1)
+
         AF = feature.AngleFeature(stft,angle,pos_mic)
 
+        # concat [1 + C-1 + N, F, T]
+        input = torch.concat((LPS,phase,AF),dim=0)
+
         ## Flatten
-        input = torch.flatten((LPS,phase,AF),start_dim=1)
+        input = torch.flatten(input,start_dim=0)
         
         ## target
         target = torch.zeros(raw.shape)
         for i  in range(n_src) : 
-            target[i,:] = librosa.load(dir_data+"/"+id_data+"_"+str(i)+".wav")
+            tmp,_ = librosa.load(dir_data+"/"+id_data+"_"+str(i)+".wav",sr=16000)
+            target[i,:] = torch.from_numpy(tmp)
 
-        data = {"input":input,"target":target}
+        data = {"flat":input,"spec":stft,"target":target}
 
         return data
 
@@ -77,4 +89,8 @@ if __name__ == "__main__":
     dataset = DatasetDOA(path="/home/data2/kbh/LGE/v2/",IPD="IPD")
     print(len(dataset))
 
-    print(dataset[0])
+    for i in range(10) :
+        print(i)
+        print(dataset[i]["flat"].shape)
+        print(dataset[i]["spec"].shape)
+        print(dataset[i]["target"].shape)
