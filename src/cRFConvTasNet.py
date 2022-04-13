@@ -1,254 +1,141 @@
-# 2022-03 ~ 
-# kooBH
-# https://github.com/kooBH
-#
-# Conv-TasNet based cRF estimator for implementation of 
-#  (2021,INTERSPEECH)MIMO Self-Attentive RNN Beamformer for Multi-Speaker Speech Separation
-# https://www.isca-speech.org/archive/interspeech_2021/li21c_interspeech.html
-# 
-# Based on ConvTasNet of  
-#   https://github.com/kaituoxu/Conv-TasNet
-#   Created on 2018/12
-#   Author: Kaituo XU
+"""
+ 2022-03 ~ 
+ kooBH
+ https://github.com/kooBH
 
+ Conv-TasNet based cRF estimator for implementation for
+  (2021,INTERSPEECH)MIMO Self-Attentive RNN Beamformer for Multi-Speaker Speech Separation
+ https://www.isca-speech.org/archive/interspeech_2021/li21c_interspeech.html
+ 
+ Using modules from  
+   https://github.com/kaituoxu/Conv-TasNet
+   Created on 2018/12
+   Author: Kaituo XU
+"""
 import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-EPS = 1e-8
+EPS = 1e-13
 
-def overlap_and_add(signal, frame_step):
-    """Reconstructs a signal from a framed representation.
-    Adds potentially overlapping frames of a signal with shape
-    `[..., frames, frame_length]`, offsetting subsequent frames by `frame_step`.
-    The resulting tensor has shape `[..., output_size]` where
-        output_size = (frames - 1) * frame_step + frame_length
-    Args:
-        signal: A [..., frames, frame_length] Tensor. All dimensions may be unknown, and rank must be at least 2.
-        frame_step: An integer denoting overlap offsets. Must be less than or equal to frame_length.
-    Returns:
-        A Tensor with shape [..., output_size] containing the overlap-added frames of signal's inner-most two dimensions.
-        output_size = (frames - 1) * frame_step + frame_length
-    Based on https://github.com/tensorflow/tensorflow/blob/r1.12/tensorflow/contrib/signal/python/ops/reconstruction_ops.py
-    """
-    outer_dimensions = signal.size()[:-2]
-    frames, frame_length = signal.size()[-2:]
+"""
+    following descriptions of 
+    Z. Zhang et al., "Multi-Channel Multi-Frame ADL-MVDR for Target Speech Separation," in IEEE/ACM Transactions on Audio, Speech, and Language Processing, vol. 29, pp. 3526-3540, 2021, doi: 10.1109/TASLP.2021.3129335.
+    https://ieeexplore.ieee.org/document/9623492
+"""
+class cRFConvTasNet(nn.Module):
+    def __init__(self,L=1,c_in=7,f_ch=256,n_fft=512,mask="Sigmoid"):
+        """
+            L : length of cRF
+            f_ch : feature channel, default 256
 
-    subframe_length = math.gcd(frame_length, frame_step)  # gcd=Greatest Common Divisor
-    subframe_step = frame_step // subframe_length
-    subframes_per_frame = frame_length // subframe_length
-    output_size = frame_step * (frames - 1) + frame_length
-    output_subframes = output_size // subframe_length
+        """
+        super(cRFConvTasNet,self).__init__()
 
-    subframe_signal = signal.view(*outer_dimensions, -1, subframe_length)
+        ## Audio Encoding Network
+        # to reduce feature dimmension
+        # 256 1x1 kernel conv
+        n_hfft = int(n_fft/2 + 1)
+        
+        dim_input = c_in * n_hfft
+        input_layer = nn.Conv1d(dim_input,f_ch,1)
 
-    frame = torch.arange(0, output_subframes).unfold(0, subframes_per_frame, subframe_step)
-    frame = signal.new_tensor(frame).long()  # signal may in GPU or CPU
-    frame = frame.contiguous().view(-1)
+        # stack of two successive TCN bolck 2^0 to 2^7 dialation
+        encoder = TCN(
+            c_in = f_ch,
+            c_out= f_ch * 2,
+            kernel = 3,
+            n_successive =2,
+            n_block = 8
+        )
 
-    result = signal.new_zeros(*outer_dimensions, output_subframes, subframe_length)
-    result.index_add_(-2, frame, subframe_signal)
-    result = result.view(*outer_dimensions, -1)
-    return result
+        ## separate filter estimatior network
+        # two successive TCN blcoks 2^0 to 2^7 dialation
+        filter_estimator = TCN(
+            c_in = f_ch,
+            c_out= f_ch * 2,
+            kernel = 3,
+            n_successive =2,
+            n_block = 8
+        )
+        
+        # output
+        # L = 0 : cBM
+        # L > 0 : cRF
+        dim_output = 2*(n_hfft * (2*L+1)**2)
+        conv_output = nn.Conv1d(
+            f_ch,
+            dim_output,
+            1
+        )
 
-class ConvTasNet(nn.Module):
-    def __init__(self, N, L, B, H, P, X, R, C, norm_type="gLN", causal=False,
-                 mask_nonlinear='relu'):
+        if mask == "Sigmoid" : 
+            activation_output= nn.Sigmoid()
+        elif mask == "Softplus":
+            activation_output= nn.Softplus()
+        else :
+            raise Exception("ERROR::{}:Unknown type of mask : {}".format(__name__,mask))
+
+        self.net = nn.Sequential(
+            input_layer,
+            encoder,
+            filter_estimator,
+            conv_output,
+            activation_output
+            )        
+
+    # input : (B, F, T)
+    def forward(self,x):
+        return self.net(x)
+
+# Temporal Convolution Network Block
+class TCN(nn.Module):
+    def __init__(self, 
+    c_in=256, 
+    c_out=512, 
+    kernel=3, 
+    n_successive=2, 
+    n_block=8, 
+    norm_type="gLN", 
+    causal=False,
+    mask='relu'
+    ):
         """
         Args:
-            N: Number of filters in autoencoder
-            L: Length of the filters (in samples)
-            B: Number of channels in bottleneck 1 × 1-conv block
-            H: Number of channels in convolutional blocks
-            P: Kernel size in convolutional blocks
-            X: Number of convolutional blocks in each repeat
-            R: Number of repeats
-            C: Number of speakers
+            c_in : 
+            c_out : 
+            kernel : Kernel size in convolutional separate blocks
+            n_succesive : Number of convolutional blocks in each repeat
+            n_block : Number of repeats
+
             norm_type: BN, gLN, cLN
             causal: causal or non-causal
-            mask_nonlinear: use which non-linear function to generate mask
         """
-        super(ConvTasNet, self).__init__()
-        # Hyper-parameter
-        self.N, self.L, self.B, self.H, self.P, self.X, self.R, self.C = N, L, B, H, P, X, R, C
-        self.norm_type = norm_type
-        self.causal = causal
-        self.mask_nonlinear = mask_nonlinear
-        # Components
-        self.encoder = Encoder(L, N)
-        self.separator = TemporalConvNet(N, B, H, P, X, R, C, norm_type, causal, mask_nonlinear)
-        self.decoder = Decoder(N, L)
-        # init
-        for p in self.parameters():
-            if p.dim() > 1:
-                nn.init.xavier_normal_(p)
+        super(TCN, self).__init__()
 
-    def forward(self, mixture):
-        """
-        Args:
-            mixture: [M, T], M is batch size, T is #samples
-        Returns:
-            est_source: [M, C, T]
-        """
-        mixture_w = self.encoder(mixture)
-        est_mask = self.separator(mixture_w)
-        est_source = self.decoder(mixture_w, est_mask)
-
-        # T changed after conv1d in encoder, fix it here
-        T_origin = mixture.size(-1)
-        T_conv = est_source.size(-1)
-        est_source = F.pad(est_source, (0, T_origin - T_conv))
-        return est_source
-
-    @classmethod
-    def load_model(cls, path):
-        # Load to CPU
-        package = torch.load(path, map_location=lambda storage, loc: storage)
-        model = cls.load_model_from_package(package)
-        return model
-
-    @classmethod
-    def load_model_from_package(cls, package):
-        model = cls(package['N'], package['L'], package['B'], package['H'],
-                    package['P'], package['X'], package['R'], package['C'],
-                    norm_type=package['norm_type'], causal=package['causal'],
-                    mask_nonlinear=package['mask_nonlinear'])
-        model.load_state_dict(package['state_dict'])
-        return model
-
-    @staticmethod
-    def serialize(model, optimizer, epoch, tr_loss=None, cv_loss=None):
-        package = {
-            # hyper-parameter
-            'N': model.N, 'L': model.L, 'B': model.B, 'H': model.H,
-            'P': model.P, 'X': model.X, 'R': model.R, 'C': model.C,
-            'norm_type': model.norm_type, 'causal': model.causal,
-            'mask_nonlinear': model.mask_nonlinear,
-            # state
-            'state_dict': model.state_dict(),
-            'optim_dict': optimizer.state_dict(),
-            'epoch': epoch
-        }
-        if tr_loss is not None:
-            package['tr_loss'] = tr_loss
-            package['cv_loss'] = cv_loss
-        return package
-
-
-class Encoder(nn.Module):
-    """Estimation of the nonnegative mixture weight by a 1-D conv layer.
-    """
-    def __init__(self, L, N):
-        super(Encoder, self).__init__()
-        # Hyper-parameter
-        self.L, self.N = L, N
-        # Components
-        # 50% overlap
-        self.conv1d_U = nn.Conv1d(1, N, kernel_size=L, stride=L // 2, bias=False)
-
-    def forward(self, mixture):
-        """
-        Args:
-            mixture: [M, T], M is batch size, T is #samples
-        Returns:
-            mixture_w: [M, N, K], where K = (T-L)/(L/2)+1 = 2T/L-1
-        """
-        mixture = torch.unsqueeze(mixture, 1)  # [M, 1, T]
-        mixture_w = F.relu(self.conv1d_U(mixture))  # [M, N, K]
-        return mixture_w
-
-
-class Decoder(nn.Module):
-    def __init__(self, N, L):
-        super(Decoder, self).__init__()
-        # Hyper-parameter
-        self.N, self.L = N, L
-        # Components
-        self.basis_signals = nn.Linear(N, L, bias=False)
-
-    def forward(self, mixture_w, est_mask):
-        """
-        Args:
-            mixture_w: [M, N, K]
-            est_mask: [M, C, N, K]
-        Returns:
-            est_source: [M, C, T]
-        """
-        # D = W * M
-        source_w = torch.unsqueeze(mixture_w, 1) * est_mask  # [M, C, N, K]
-        source_w = torch.transpose(source_w, 2, 3) # [M, C, K, N]
-        # S = DV
-        est_source = self.basis_signals(source_w)  # [M, C, K, L]
-        est_source = overlap_and_add(est_source, self.L//2) # M x C x T
-        return est_source
-
-
-class TemporalConvNet(nn.Module):
-    def __init__(self, N, B, H, P, X, R, C, norm_type="gLN", causal=False,
-                 mask_nonlinear='relu'):
-        """
-        Args:
-            N: Number of filters in autoencoder
-            B: Number of channels in bottleneck 1 × 1-conv block
-            H: Number of channels in convolutional blocks
-            P: Kernel size in convolutional blocks
-            X: Number of convolutional blocks in each repeat
-            R: Number of repeats
-            C: Number of speakers
-            norm_type: BN, gLN, cLN
-            causal: causal or non-causal
-            mask_nonlinear: use which non-linear function to generate mask
-        """
-        super(TemporalConvNet, self).__init__()
-        # Hyper-parameter
-        self.C = C
-        self.mask_nonlinear = mask_nonlinear
-        # Components
-        # [M, N, K] -> [M, N, K]
-        layer_norm = ChannelwiseLayerNorm(N)
-        # [M, N, K] -> [M, B, K]
-        bottleneck_conv1x1 = nn.Conv1d(N, B, 1, bias=False)
-        # [M, B, K] -> [M, B, K]
         repeats = []
-        for r in range(R):
+        for r in range(n_successive):
             blocks = []
-            for x in range(X):
+            for x in range(n_block):
                 dilation = 2**x
-                padding = (P - 1) * dilation if causal else (P - 1) * dilation // 2
-                blocks += [TemporalBlock(B, H, P, stride=1,
-                                         padding=padding,
-                                         dilation=dilation,
-                                         norm_type=norm_type,
-                                         causal=causal)]
+                padding = (kernel - 1) * dilation if causal else (kernel - 1) * dilation // 2
+                blocks += [TemporalBlock(
+                    in_channels=c_in,
+                    out_channels= c_out,
+                    kernel_size= kernel, 
+                    stride=1,
+                    padding=padding,
+                    dilation=dilation,
+                    norm_type=norm_type,
+                    causal=causal)]
             repeats += [nn.Sequential(*blocks)]
-        temporal_conv_net = nn.Sequential(*repeats)
-        # [M, B, K] -> [M, C*N, K]
-        mask_conv1x1 = nn.Conv1d(B, C*N, 1, bias=False)
-        # Put together
-        self.network = nn.Sequential(layer_norm,
-                                     bottleneck_conv1x1,
-                                     temporal_conv_net,
-                                     mask_conv1x1)
 
-    def forward(self, mixture_w):
-        """
-        Keep this API same with TasNet
-        Args:
-            mixture_w: [M, N, K], M is batch size
-        returns:
-            est_mask: [M, C, N, K]
-        """
-        M, N, K = mixture_w.size()
-        score = self.network(mixture_w)  # [M, N, K] -> [M, C*N, K]
-        score = score.view(M, self.C, N, K) # [M, C*N, K] -> [M, C, N, K]
-        if self.mask_nonlinear == 'softmax':
-            est_mask = F.softmax(score, dim=1)
-        elif self.mask_nonlinear == 'relu':
-            est_mask = F.relu(score)
-        else:
-            raise ValueError("Unsupported mask non-linear function")
-        return est_mask
+        self.net = nn.Sequential(*repeats)
+
+    def forward(self, x):
+        return self.net(x) 
+ 
 
 
 class TemporalBlock(nn.Module):
@@ -398,33 +285,19 @@ class GlobalLayerNorm(nn.Module):
 
 
 if __name__ == "__main__":
-    torch.manual_seed(123)
-    M, N, L, T = 2, 3, 4, 12
-    K = 2*T//L-1
-    B, H, P, X, R, C, norm_type, causal = 2, 3, 3, 3, 2, 2, "gLN", False
-    mixture = torch.randint(3, (M, T))
-    # test Encoder
-    encoder = Encoder(L, N)
-    encoder.conv1d_U.weight.data = torch.randint(2, encoder.conv1d_U.weight.size())
-    mixture_w = encoder(mixture)
-    print('mixture', mixture)
-    print('U', encoder.conv1d_U.weight)
-    print('mixture_w', mixture_w)
-    print('mixture_w size', mixture_w.size())
+    B = 2
+    C = 7
+    L = 1
+    T = 250
+    F = 257
 
-    # test TemporalConvNet
-    separator = TemporalConvNet(N, B, H, P, X, R, C, norm_type=norm_type, causal=causal)
-    est_mask = separator(mixture_w)
-    print('est_mask', est_mask)
+    net = cRFConvTasNet(
+        L=L
+    )
+    x = torch.rand(B,C*F,T)
 
-    # test Decoder
-    decoder = Decoder(N, L)
-    est_mask = torch.randint(2, (B, K, C, N))
-    est_source = decoder(mixture_w, est_mask)
-    print('est_source', est_source)
+    y = net(x)
+    print(y.shape)
 
-    # test Conv-TasNet
-    conv_tasnet = ConvTasNet(N, L, B, H, P, X, R, C, norm_type=norm_type)
-    est_source = conv_tasnet(mixture)
-    print('est_source', est_source)
-    print('est_source size', est_source.size())
+    z = torch.reshape(y,(B,(2*L+1)**2,F,2,T))
+    print(z.shape)
