@@ -1,3 +1,6 @@
 [submodule "dataset/gpuRIR/gpuRIR"]
 	path = dataset/gpuRIR
 	url = https://github.com/kooBH/gpuRIR.git
+[submodule "src/ptUtils"]
+	path = src/ptUtils
+	url = https://github.com/kooBH/ptUtils.git

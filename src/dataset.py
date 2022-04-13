@@ -1,5 +1,6 @@
 import os,glob
 import torch
+import numpy
 import librosa
 import numpy as np
 import torch.nn.functional as F
@@ -53,22 +54,32 @@ class DatasetDOA(torch.utils.data.Dataset):
         # NOTE #1
         # [:T] due to 1 frame mismatch. Maybe because of shift?
         # need to check later.  
-        stft = torch.stft(raw,n_fft=1024,center=True,return_complex=True)[:,:,:T]
+        stft = torch.stft(raw,n_fft=512,center=True,return_complex=True)[:,:,:T]
         LPS =  feature.LogPowerSpectral(stft[0:1,:,:])
 
         # Using selected phase preprocessor
         phase = self.phase(stft)
 
         # Angle feature
-        angle =  torch.stack((azimuth,elevation),-1)
+        angle = torch.zeros((4,T,2))
+        angle[:n_src,:,:] =  torch.stack((azimuth,elevation),-1)
+
+        ## dup for null target
+        if n_src < 4:
+            angle[n_src:4,:,:] = angle[numpy.random.choice(range(n_src),4-n_src),:,:]
 
         AF = feature.AngleFeature(stft,angle,pos_mic)
 
-        # concat [1 + C-1 + N, F, T]
-        input = torch.concat((LPS,phase,AF),dim=0)
-
         ## Flatten
-        input = torch.flatten(input,start_dim=0)
+        # LPS [1,F,T] -> [F,T]
+        LPS = torch.flatten(LPS,end_dim=1)
+        # phase [C-1,F,T] -> [(C-1)*F,T]
+        phase = torch.flatten(phase,end_dim=1)
+        # AF [N,F,T] -> [N*F,T]
+        AF = torch.flatten(AF,end_dim=1) 
+
+        # concat [B,F+F'+F'',T]
+        input = torch.concat((LPS,phase,AF))
         
         ## target
         target = torch.zeros(raw.shape)
