@@ -25,21 +25,28 @@ EPS = 1e-13
     https://ieeexplore.ieee.org/document/9623492
 """
 class cRFConvTasNet(nn.Module):
-    def __init__(self,L=1,c_in=7,f_ch=256,n_fft=512,mask="Sigmoid"):
+    def __init__(self,L=1,c_in=4,n_target=4,f_ch=256,n_fft=512,mask="Sigmoid"):
         """
             L : length of cRF
             f_ch : feature channel, default 256
-
         """
         super(cRFConvTasNet,self).__init__()
+
 
         ## Audio Encoding Network
         # to reduce feature dimmension
         # 256 1x1 kernel conv
         n_hfft = int(n_fft/2 + 1)
         
-        dim_input = c_in * n_hfft
+        dim_input = (1 + c_in-1 + 2*n_target) * n_hfft
         input_layer = nn.Conv1d(dim_input,f_ch,1)
+        self.N = n_target
+
+        print("{}::dim_input : {}".format(self.__class__.__name__,dim_input))
+
+        self.C = c_in
+        self.L = L
+        self.F = n_hfft
 
         # stack of two successive TCN bolck 2^0 to 2^7 dialation
         encoder = TCN(
@@ -59,11 +66,15 @@ class cRFConvTasNet(nn.Module):
             n_successive =2,
             n_block = 8
         )
-        
-        # output
+        """
+        + Complex Ratio Filter
+        W. Mack and E. A. P. Habets, "Deep Filtering: Signal Extraction and Reconstruction Using Complex Time-Frequency Filters," in IEEE Signal Processing Letters, vol. 27, pp. 61-65, 2020, doi: 10.1109/LSP.2019.2955818.
+        """ 
+        ## output
         # L = 0 : cBM
         # L > 0 : cRF
-        dim_output = 2*(n_hfft * (2*L+1)**2)
+        # n_target * n_channel * freq * filter * complex 
+        dim_output = n_target * c_in * n_hfft * ((2*L+1)**2) * 2
         conv_output = nn.Conv1d(
             f_ch,
             dim_output,
@@ -85,9 +96,17 @@ class cRFConvTasNet(nn.Module):
             activation_output
             )        
 
-    # input : (B, F, T)
+    # input : (B, Flatten, T)
     def forward(self,x):
-        return self.net(x)
+        B = x.shape[0]
+        T = x.shape[-1]
+        filter = self.net(x)
+
+       # [B,N, C, filter, n_hfft, Time, 2(complex)]
+        filter = torch.reshape(filter,(B,self.N,self.C, (2*self.L+1),(2*self.L+1),self.F,T,2))
+
+        # Return in Complex type
+        return torch.view_as_complex(filter)
 
 # Temporal Convolution Network Block
 class TCN(nn.Module):

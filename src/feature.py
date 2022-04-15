@@ -6,7 +6,7 @@ import torch
 def LogPowerSpectral(stft):
     # dB scale
     power_spectral = torch.abs(stft)
-    log_power_spectral = 10*torch.log10(power_spectral)
+    log_power_spectral = 10*torch.log10(1+power_spectral)
     return log_power_spectral
 
 """ Inter-phase difference
@@ -21,7 +21,7 @@ IPD : [C-1, F, T]
 
 """
 def InterPhaseDifference(stft):
-    d = stft[1:,:,:]/stft[0,:,:]
+    d = stft[1:,:,:]/(stft[0,:,:]+1e-13)
     IPD =  torch.angle(d)
     return IPD
 
@@ -30,12 +30,12 @@ def NormalizedIPD(stft):
     raise Exception("NormalizedIPD::Not Implemented")
 
 def cosIPD(stft):
-    d = stft[1:,:,:]/stft[0,:,:]
+    d = stft[1:,:,:]/(stft[0,:,:]+1e-13)
     IPD =  torch.angle(d)
     return torch.cos(IPD)
 
 def sinIPD(stft):
-    d = stft[1:,:,:]/stft[0,:,:]
+    d = stft[1:,:,:]/(stft[0,:,:]+1e-13)
     IPD =  torch.angle(d)
     return torch.sin(IPD)
 
@@ -65,7 +65,7 @@ mic_pos : [C,3]
 + return
 AF : [N,C,F,T]
 """
-def AngleFeature(stft,angle,mic_pos,fs=16000):
+def AngleFeature(stft,angle,mic_pos,fs=16000,complex=False):
     # F : n_hfft
     C,F,T = stft.shape 
     N,_,_ = angle.shape
@@ -87,17 +87,45 @@ def AngleFeature(stft,angle,mic_pos,fs=16000):
     for i in range(N) : 
         RDOA[i,:,:] = torch.matmul(d_dist,d_angle[i,:,:].T) 
 
-    ## steering vector
+    ## Steering vector
     SV = torch.zeros(N,C,F,T, dtype=torch.cfloat)
     for i in range(F):
         SV[:,:,i,:] = torch.exp(1j*2*pi*i/n_fft*RDOA*fs/ss)
 
+
+    """
+    K. Tan, Y. Xu, S. Zhang, M. Yu and D. Yu, "Audio-Visual Speech Separation and Dereverberation With a Two-Stage Multimodal Network," in IEEE Journal of Selected Topics in Signal Processing, vol. 14, no. 3, pp. 542-553, March 2020, doi: 10.1109/JSTSP.2020.2987209.
+
+    ... complex-valued, and they are treated as 2-D vectors in the operations < ·, · > and ||·||, where their real and imaginary parts are regarded as two vector  components.
+    """
+
     ## Angle Feature
-    AF = torch.zeros(N,C,F,T, dtype=torch.cfloat)
-    for i in range(N) : 
-        tmp_term =  SV[i,:,:,:]*(stft[:,:,:]/stft[0:1,:,:])
-        AF [i,:,:,:] = tmp_term/torch.abs(tmp_term)
-    AF = torch.sum(AF,axis=0)
+    if complex : 
+        AF = torch.zeros(N,C,F,T, dtype=torch.cfloat)
+        for i in range(N) : 
+            tmp_term =  SV[i,:,:,:]*(stft[:,:,:]/stft[0:1,:,:])
+            AF[i,:,:,:] = tmp_term/torch.abs(tmp_term)
+        AF = torch.sum(AF,axis=1)
+    else :
+        ## real, imag as independent channel
+        #AF = torch.zeros(2*N,C,F,T, dtype=torch.cfloat)
+        #SV = torch.view_as_real(SV)
+        #for i in range(N) : 
+        #    tmp_stft = stft[:,:,:]/stft[0:1,:,:]
+        #    tmp_stft = torch.view_as_real(tmp_stft)
+        #    tmp_term = SV[i,:,:,:,:]*tmp_stft[:,:,:,:] 
+        #    AF[2*i,:,:,:] = tmp_term[:,:,:,0]/torch.ans(tmp_term[:,:,:,0])
+        #    AF[2*i+1,:,:,:] = tmp_term[:,:,:,1]/torch.ans(tmp_term[:,:,:,1])
+        #AF = torch.sum(AF,axis=1)
+
+        ## split real,imag in AF only
+        AF = torch.zeros(N,C,F,T, dtype=torch.cfloat)
+        for i in range(N) : 
+            tmp_term =  SV[i,:,:,:]*(stft[:,:,:]/(stft[0:1,:,:]+1e-13))
+            AF[i,:,:,:] = tmp_term/(torch.abs(tmp_term)+1e-13)
+        AF = torch.sum(AF,axis=1)
+        AF = torch.view_as_real(AF)                
+        AF = torch.reshape(AF,(2*N,F,T))
 
     return AF
 

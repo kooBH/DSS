@@ -1,0 +1,8 @@
+torch==1.11
+torchaudio
+argparse
+librosa
+numpy
+pyyaml
+tensorboardX
+matplotlib

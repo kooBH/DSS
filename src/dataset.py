@@ -10,11 +10,12 @@ import feature
 import pdb
 
 class DatasetDOA(torch.utils.data.Dataset):
-    def __init__(self,path,IPD="IPD"):
+    def __init__(self,path,n_target = 4, IPD="IPD"):
         self.list_data = glob.glob(os.path.join(path,"*.wav"))
-
         # filtering target audio
         self.list_data = list(filter(lambda k: not '_' in k.split('/')[-1], self.list_data))
+
+        self.n_target = n_target
 
         if IPD == "IPD" : 
             self.phase = feature.InterPhaseDifference
@@ -64,9 +65,10 @@ class DatasetDOA(torch.utils.data.Dataset):
         angle = torch.zeros((4,T,2))
         angle[:n_src,:,:] =  torch.stack((azimuth,elevation),-1)
 
-        ## dup for null target
-        if n_src < 4:
-            angle[n_src:4,:,:] = angle[numpy.random.choice(range(n_src),4-n_src),:,:]
+        ## dup for null target - angle
+        dup = numpy.random.choice(range(n_src),4-n_src)
+        if n_src < self.n_target:
+            angle[n_src:self.n_target,:,:] = angle[dup,:,:]
 
         AF = feature.AngleFeature(stft,angle,pos_mic)
 
@@ -78,16 +80,21 @@ class DatasetDOA(torch.utils.data.Dataset):
         # AF [N,F,T] -> [N*F,T]
         AF = torch.flatten(AF,end_dim=1) 
 
-        # concat [B,F+F'+F'',T]
+        # concat [F+F'+F'',T]
         input = torch.concat((LPS,phase,AF))
         
-        ## target
-        target = torch.zeros(raw.shape)
+        ## target [N, C, T]
+        target = torch.zeros(self.n_target, raw.shape[0] , raw.shape[1])
         for i  in range(n_src) : 
-            tmp,_ = librosa.load(dir_data+"/"+id_data+"_"+str(i)+".wav",sr=16000)
-            target[i,:] = torch.from_numpy(tmp)
+            tmp,_ = librosa.load(dir_data+"/"+id_data+"_"+str(i)+".wav",sr=16000,mono=False)
+            target[i,:,:] = torch.from_numpy(tmp)
 
-        data = {"flat":input,"spec":stft,"target":target}
+        ## dup for null target - target wav
+        if  n_src < self.n_target :
+              target[n_src:self.n_target,:,:] = target[dup,:,:]
+
+
+        data = {"flat":input,"spec":stft,"target":target,"path_raw":self.list_data[idx]}
 
         return data
 

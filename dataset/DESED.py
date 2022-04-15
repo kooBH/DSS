@@ -46,7 +46,7 @@ def process(idx):
     # gen random parameters
     #n_source = np.random.randint(low=1,high=4)
     #list_sources = np.random.choice(target_list,n_source)
-    generate(output_root,list_sources[idx],idx,50,shift=256,match="4sec")
+    generate(output_root,list_sources[idx],idx,50,shift=128,match="4sec")
 
 if __name__=='__main__': 
     cpu_num = cpu_count()
