@@ -10,7 +10,7 @@ import feature
 import pdb
 
 class DatasetDOA(torch.utils.data.Dataset):
-    def __init__(self,path,n_target = 4, IPD="IPD"):
+    def __init__(self,path,n_target = 4, IPD="cosIPD"):
         self.list_data = glob.glob(os.path.join(path,"*.wav"))
         # filtering target audio
         self.list_data = list(filter(lambda k: not '_' in k.split('/')[-1], self.list_data))
@@ -47,7 +47,11 @@ class DatasetDOA(torch.utils.data.Dataset):
 
         T = elevation.shape[1]
 
-        raw,_ = librosa.load(self.list_data[idx],sr=16000,mono=False)        
+        # Temporal treatment for 'Audio buffer is not finite everywhere' error
+        try : 
+            raw,_ = librosa.load(self.list_data[idx],sr=16000,mono=False)        
+        except librosa.ParameterError as e:
+            return self.__getitem__(idx+1)
 
         raw = torch.from_numpy(raw)
 
@@ -62,11 +66,11 @@ class DatasetDOA(torch.utils.data.Dataset):
         phase = self.phase(stft)
 
         # Angle feature
-        angle = torch.zeros((4,T,2))
+        angle = torch.zeros((self.n_target,T,2))
         angle[:n_src,:,:] =  torch.stack((azimuth,elevation),-1)
 
         ## dup for null target - angle
-        dup = numpy.random.choice(range(n_src),4-n_src)
+        dup = numpy.random.choice(range(n_src),self.n_target-n_src)
         if n_src < self.n_target:
             angle[n_src:self.n_target,:,:] = angle[dup,:,:]
 
@@ -94,7 +98,7 @@ class DatasetDOA(torch.utils.data.Dataset):
               target[n_src:self.n_target,:,:] = target[dup,:,:]
 
 
-        data = {"flat":input,"spec":stft,"target":target,"path_raw":self.list_data[idx]}
+        data = {"flat":input,"spec":stft,"target":target,"path_raw":self.list_data[idx],"raw":raw[:,:]}
 
         return data
 

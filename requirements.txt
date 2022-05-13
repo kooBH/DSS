@@ -6,3 +6,5 @@ numpy
 pyyaml
 tensorboardX
 matplotlib
+tqdm
+pesq

@@ -65,7 +65,7 @@ mic_pos : [C,3]
 + return
 AF : [N,C,F,T]
 """
-def AngleFeature(stft,angle,mic_pos,fs=16000,complex=False):
+def AngleFeature(stft,angle,mic_pos,fs=16000,complex=False,dist=1.0):
     # F : n_hfft
     C,F,T = stft.shape 
     N,_,_ = angle.shape
@@ -74,23 +74,21 @@ def AngleFeature(stft,angle,mic_pos,fs=16000,complex=False):
     pi = 3.141592653589793
     n_fft = 2*F+1
 
-    ## relative_distance_of_arrival
-    d_angle = torch.zeros(N,T,3)
-    d_angle[:,:,0] = torch.cos(angle[:,:,0]/180*pi)*torch.sin(angle[:,:,1]/180*pi)
-    d_angle[:,:,1] = torch.sin(angle[:,:,0]/180*pi)*torch.sin(angle[:,:,1]/180*pi)
-    d_angle[:,:,2] = torch.cos(angle[:,:,1]/180*pi)
+    ## location of sources
+    loc_src = torch.zeros(N,T,3)
+    loc_src[:,:,0] = dist*torch.cos((90-angle[:,:,0])/180*pi)*torch.sin((90-angle[:,:,1])/180*pi)
+    loc_src[:,:,1] = dist*torch.sin((90-angle[:,:,0])/180*pi)*torch.sin((90-angle[:,:,1])/180*pi)
+    loc_src[:,:,2] = dist*torch.cos((90-angle[:,:,1])/180*pi)
 
-    # 
-    d_dist = mic_pos[0:1,:] - mic_pos[:,:]
-
-    RDOA = torch.zeros(N,C,T)
-    for i in range(N) : 
-        RDOA[i,:,:] = torch.matmul(d_dist,d_angle[i,:,:].T) 
+    # TDOA
+    TDOA = torch.zeros(N,C,T)
+    for i in range(C) : 
+        TDOA[:,i,:] = torch.norm(mic_pos[i,:] - loc_src[:,:,:] )
 
     ## Steering vector
     SV = torch.zeros(N,C,F,T, dtype=torch.cfloat)
     for i in range(F):
-        SV[:,:,i,:] = torch.exp(1j*2*pi*i/n_fft*RDOA*fs/ss)
+        SV[:,:,i,:] = torch.exp(1j*2*pi*i/n_fft*TDOA*fs/ss)
 
 
     """

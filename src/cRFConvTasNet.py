@@ -85,6 +85,8 @@ class cRFConvTasNet(nn.Module):
             activation_output= nn.Sigmoid()
         elif mask == "Softplus":
             activation_output= nn.Softplus()
+        elif mask == "Tanh" : 
+            activation_output = nn.Tanh()
         else :
             raise Exception("ERROR::{}:Unknown type of mask : {}".format(__name__,mask))
 
@@ -95,6 +97,8 @@ class cRFConvTasNet(nn.Module):
             conv_output,
             activation_output
             )        
+        
+        self.net.apply(init_weights)
 
     # input : (B, Flatten, T)
     def forward(self,x):
@@ -108,6 +112,20 @@ class cRFConvTasNet(nn.Module):
         # Return in Complex type
         return torch.view_as_complex(filter)
 
+def init_weights(m):
+    if isinstance(m, (nn.Conv2d, nn.Conv1d)):
+        nn.init.kaiming_normal_(m.weight)
+        if m.bias is not None:
+            nn.init.constant_(m.bias, 0)
+    elif isinstance(m, nn.BatchNorm2d):
+        nn.init.constant_(m.weight, 1)
+        if m.bias is not None:
+            nn.init.constant_(m.bias, 0)
+    if isinstance(m, nn.Linear):
+        nn.init.kaiming_uniform_(m.weight)
+        if m.bias is not None:
+            nn.init.constant_(m.bias, 0)
+
 # Temporal Convolution Network Block
 class TCN(nn.Module):
     def __init__(self, 
@@ -117,7 +135,7 @@ class TCN(nn.Module):
     n_successive=2, 
     n_block=8, 
     norm_type="gLN", 
-    causal=False,
+    causal=True,
     mask='relu'
     ):
         """
@@ -151,9 +169,10 @@ class TCN(nn.Module):
             repeats += [nn.Sequential(*blocks)]
 
         self.net = nn.Sequential(*repeats)
+        self.activation = nn.Tanh()
 
     def forward(self, x):
-        return self.net(x) 
+        return self.activation(self.net(x)) 
  
 
 
@@ -305,18 +324,17 @@ class GlobalLayerNorm(nn.Module):
 
 if __name__ == "__main__":
     B = 2
-    C = 7
+    C = 4
+    N = 2
     L = 1
     T = 250
     F = 257
 
     net = cRFConvTasNet(
-        L=L
+        L=L,
+        n_target = N
     )
-    x = torch.rand(B,C*F,T)
+    x = torch.rand(B,(C + N*2)*F,T)
 
     y = net(x)
     print(y.shape)
-
-    z = torch.reshape(y,(B,(2*L+1)**2,F,2,T))
-    print(z.shape)

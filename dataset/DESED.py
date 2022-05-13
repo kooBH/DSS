@@ -46,10 +46,15 @@ def process(idx):
     # gen random parameters
     #n_source = np.random.randint(low=1,high=4)
     #list_sources = np.random.choice(target_list,n_source)
-    generate(output_root,list_sources[idx],idx,50,shift=128,match="4sec")
+    #generate(output_root,list_sources[idx],idx,50,shift=128,match="1sec",fix=True,max_SIR=5)
+    #generate(output_root,list_sources[idx],idx,50,shift=128,match="1sec",fix=True,max_SIR=5,max_RT60=0.15)
+
+    ## 2022-05-09 original 'signals' scale
+    generate(output_root,list_sources[idx],idx,50,shift=128,match="1sec",fix=True,max_SIR=5,max_RT60=0.15,norm_signals=False)
 
 if __name__=='__main__': 
     cpu_num = cpu_count()
+    cpu_num = 16
 
     os.makedirs(os.path.join(output_root),exist_ok=True)
 
