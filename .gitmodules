@@ -7,3 +7,6 @@
 [submodule "src/MLDR"]
 	path = src/MLDR
 	url = https://github.com/kooBH/MLDR.git
+[submodule "MATLAB/MLDR"]
+	path = MATLAB/MLDR
+	url = https://github.com/kooBH/MLDR.git
