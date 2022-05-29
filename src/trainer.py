@@ -11,14 +11,13 @@ from cRFConvTasNet import cRFConvTasNet
 from ptUtils.hparams import HParam
 from ptUtils.writer import MyWriter
 from ptUtils.Loss import mSDRLoss,wSDRLoss,SISDRLoss,iSDRLoss
-
-
+from ptUtils.metric import SIR,PESQ
 
 def get_loss(hp,target,output,criterion,device,raw=None): 
     N = hp.model.n_target
     C = hp.data.n_channel
 
-    loss = torch.tensor(0.0).to(device)
+    loss = torch.tensor(0.0,requires_grad=True).to(device)
 
     if not hp.loss.cross : 
         for l in range(N) : 
@@ -142,14 +141,12 @@ if __name__ == '__main__':
 
     step = args.step
 
-    idx_plot = np.random.randint(hp.train.batch_size)
-
     for epoch in range(num_epochs) :
         ### TRAIN ####
         model.train()
         train_loss=0
         for i, (batch_data) in enumerate(train_loader):
-            step +=1
+            step += batch_data['flat'].shape[0]
             
             ## run model
             feature = batch_data['flat'].to(device)
@@ -192,7 +189,7 @@ if __name__ == '__main__':
             ## Normalization
             denom_max = torch.max(torch.abs(output_raw),dim=3)[0]
             denom_max = torch.unsqueeze(denom_max,dim=-1)
-            output_raw = output_raw/denom_max
+            output_raw = output_raw/(denom_max + 1e-7)
 
             ## Loss
             target = batch_data['target'].to(device)
@@ -216,7 +213,12 @@ if __name__ == '__main__':
         #### EVAL ####
         model.eval()
         with torch.no_grad():
-            test_loss =0.
+            SIR_eval = torch.tensor(0.0).to(device)
+            PESQ_eval = torch.tensor(0.0).to(device)
+            cnt_SIR = 0
+            cnt_PESQ = 0
+
+            test_loss = torch.tensor(0.0,requires_grad=True)
             for i, (batch_data) in enumerate(test_loader):
                 # run model
                 feature = batch_data['flat'].to(device)
@@ -250,28 +252,48 @@ if __name__ == '__main__':
                 ## Normalization
                 denom_max = torch.max(torch.abs(output_raw),dim=3)[0]
                 denom_max = torch.unsqueeze(denom_max,dim=-1)
-                output_raw = output_raw/denom_max
+                output_raw = output_raw/(denom_max + 1e-7)
 
                 ## Loss
                 target = batch_data['target'].to(device)
                 raw = batch_data['raw'].to(device)
                 loss = get_loss(hp,target,output_raw,Loss,device,raw)
 
+                """ Too Slow
+                ## Metric
+                for B_SIR in range(output_raw.shape[0]) :
+                    for C_SIR in range(output_raw.shape[2]):
+                        SIR_eval += SIR(output_raw[B_SIR,:,C_SIR,:],target[B_SIR,:,C_SIR,:],device=device)
+                        cnt_SIR +=1
+
+                        for N_SIR in range(output_raw.shape[1]): 
+                            PESQ_eval += PESQ(output_raw[B_SIR,N_SIR,C_SIR,:],target[B_SIR,N_SIR,C_SIR,:])
+                            cnt_PESQ+=1
+                """                
+
+                ## LOG
+
                 print('TEST::{} : Epoch [{}/{}], Step [{}/{}], Loss: {:.4e}'.format(version, epoch+1, num_epochs, i+1, len(test_loader), loss.item()))
                 test_loss +=loss.item()
-
-
-
 
             test_loss = test_loss/len(test_loader)
             if hp.scheduler.type == 'Plateau':
                 scheduler.step(test_loss)
             else :
                 scheduler.step(test_loss)
-            
+
+            ## Log 
+            idx_plot = np.random.randint(input.shape[0])
+
             writer.log_value(test_loss,step,'test loss : ' + hp.loss.type)
 
-            writer.log_audio(raw[idx_plot,0,:],"input {}".format(batch_data['path_raw'][idx_plot]),step)
+            SIR_eval /=cnt_SIR
+            PESQ_eval /=cnt_PESQ
+
+            #writer.log_value(SIR_eval,step,"SIR")
+            #writer.log_value(PESQ_eval,step,"PESQ")
+
+            writer.log_audio(raw[idx_plot,0,:],"input",step)
 
             plot_data = torch.zeros(8,raw.shape[2])
 

@@ -4,6 +4,7 @@ import soundfile as sf
 import argparse
 import os
 import numpy as np
+from ptUtils.metric import SIR,PESQ
 
 from tqdm import tqdm
 
@@ -19,9 +20,7 @@ if __name__ == "__main__":
                         help="yaml for configuration")
     parser.add_argument('--chkpt',type=str,required=True)
     parser.add_argument('--dir_input','-i',type=str,required=True)
-    parser.add_argument('--dir_output','-o',type=str,required=True)
     parser.add_argument('--device','-d',type=str,required=False,default="cuda:0")
-    parser.add_argument('--mono','-m',type=bool,required=False,default=True)
     args = parser.parse_args()
 
     hp = HParam(args.config)
@@ -44,8 +43,6 @@ if __name__ == "__main__":
 
     modelsave_path = args.chkpt
 
-    os.makedirs(args.dir_output,exist_ok=True)
-
     dataset = DatasetDOA(args.dir_input,n_target)
     loader = torch.utils.data.DataLoader(dataset=dataset,batch_size=batch_size,num_workers=num_workers)
 
@@ -61,8 +58,12 @@ if __name__ == "__main__":
 
     #### EVAL ####
     model.eval()
+    SIR_eval = torch.zeros(4).to(device)
+    PESQ_eval = torch.zeros(4).to(device)
+    cnt_PESQ = [0,0,0,0]
+    cnt_SIR = [0,0,0,0]
     with torch.no_grad():
-        test_loss =0.
+        test_loss =0.   
         for i, (batch_data) in tqdm(enumerate(loader),total=len(dataset)):
             # run model
             feature = batch_data['flat'].to(device)
@@ -98,20 +99,38 @@ if __name__ == "__main__":
             denom_max = torch.unsqueeze(denom_max,dim=-1)
             output_raw = output_raw/denom_max
 
-            ## Save
-            # parse id
-            path = batch_data['path_raw'][0]
-            name = path.split('/')[-1]
-            id = name.split('.')[0]
 
-            for j in range(N) : 
-                if args.mono : 
-                    sf.write(args.dir_output+'/'+id+'_'+str(j)+'.wav',output_raw[0,j,0,:].cpu().detach().numpy(),16000)
-                else :
-                    sf.write(args.dir_output+'/'+id+'_'+str(j)+'.wav',output_raw[0,j,:,:].cpu().detach().numpy(),16000)
+            target = batch_data['target'].to(device)
+
+            ## Metric
+            B_SIR = 0
+            n_src = batch_data["n_src"][0]
+
+            for C_SIR in range(output_raw.shape[2]):
+                SIR_eval[n_src-1] += SIR(output_raw[B_SIR,:,C_SIR,:],target[B_SIR,:,C_SIR,:],device=device)
+
+                cnt_SIR[n_src-1] +=1
+
+                for N_SIR in range(n_src): 
+                    PESQ_eval[n_src-1] += PESQ(output_raw[B_SIR,N_SIR,C_SIR,:],target[B_SIR,N_SIR,C_SIR,:])
+
+                    cnt_PESQ[n_src-1] +=1
+
+
+    print("version : {}".format(args.config))
+ 
+    print("SIR {} | PESQ {}".format(
+        torch.sum(SIR_eval)/np.sum(cnt_SIR),
+        torch.sum(PESQ_eval)/np.sum(cnt_PESQ)
+    ))
+
+    for i in range(4) : 
+        SIR_eval[i] /=cnt_SIR[i]
+        PESQ_eval[i] /=cnt_PESQ[i]
+        print("n_src :  {} | SIR : {} | PESQ : {}".format(i+1,SIR_eval[i],PESQ_eval[i]))
+       
+
+
 
         
-
-
-            
 

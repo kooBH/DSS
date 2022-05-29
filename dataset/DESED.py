@@ -39,7 +39,7 @@ print("Target Files : {}".format(len(target_list)))
 
 list_sources = []
 for i in range(n_output):
-    n_source = np.random.randint(low=1,high=5)
+    n_source = np.random.randint(low=1,high=4+1)
     list_sources.append(np.random.choice(target_list,n_source))
 
 def process(idx):
@@ -49,8 +49,13 @@ def process(idx):
     #generate(output_root,list_sources[idx],idx,50,shift=128,match="1sec",fix=True,max_SIR=5)
     #generate(output_root,list_sources[idx],idx,50,shift=128,match="1sec",fix=True,max_SIR=5,max_RT60=0.15)
 
-    ## 2022-05-09 original 'signals' scale
-    generate(output_root,list_sources[idx],idx,50,shift=128,match="1sec",fix=True,max_SIR=5,max_RT60=0.15,norm_signals=False)
+    ## 2022-05-09 v4 : original 'signals' scale
+    #generate(output_root,list_sources[idx],idx,50,shift=128,match="1sec",fix=True,max_SIR=5,max_RT60=0.15,norm_signals=False)
+
+    ## 2022-05-24 v5 : more hard
+    generate(output_root,list_sources[idx],idx,50,shift=128,match="1sec",fix=True,max_SIR=10,max_RT60=0.8,norm_signals=False)
+
+
 
 if __name__=='__main__': 
     cpu_num = cpu_count()

@@ -25,7 +25,15 @@ EPS = 1e-13
     https://ieeexplore.ieee.org/document/9623492
 """
 class cRFConvTasNet(nn.Module):
-    def __init__(self,L=1,c_in=4,n_target=4,f_ch=256,n_fft=512,mask="Sigmoid"):
+    def __init__(self,
+    L=1,
+    c_in=4,
+    n_target=4,
+    f_ch=256,
+    n_fft=512,
+    mask="Sigmoid",
+    TCN_activation="None"
+    ):
         """
             L : length of cRF
             f_ch : feature channel, default 256
@@ -54,7 +62,8 @@ class cRFConvTasNet(nn.Module):
             c_out= f_ch * 2,
             kernel = 3,
             n_successive =2,
-            n_block = 8
+            n_block = 8,
+            TCN_activation=TCN_activation
         )
 
         ## separate filter estimatior network
@@ -64,7 +73,8 @@ class cRFConvTasNet(nn.Module):
             c_out= f_ch * 2,
             kernel = 3,
             n_successive =2,
-            n_block = 8
+            n_block = 8,
+            TCN_activation=TCN_activation
         )
         """
         + Complex Ratio Filter
@@ -136,7 +146,8 @@ class TCN(nn.Module):
     n_block=8, 
     norm_type="gLN", 
     causal=True,
-    mask='relu'
+    mask='relu',
+    TCN_activation="None"
     ):
         """
         Args:
@@ -169,7 +180,16 @@ class TCN(nn.Module):
             repeats += [nn.Sequential(*blocks)]
 
         self.net = nn.Sequential(*repeats)
-        self.activation = nn.Tanh()
+        if TCN_activation == "None" : 
+            self.activation = nn.Identity()
+        elif TCN_activation == "Tanh" : 
+            self.activation == nn.Tanh()
+        elif TCN_activation == "Sigmoid" : 
+            self.activation = nn.Sigmoid()
+        elif TCN_activation == "PReLU" : 
+            self.activation = nn.PReLU()
+        else : 
+            raise Exception("ERROR::TCN:: {} is invalid activation".format(TCN_activation))
 
     def forward(self, x):
         return self.activation(self.net(x)) 
