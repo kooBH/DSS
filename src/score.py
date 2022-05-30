@@ -120,14 +120,18 @@ if __name__ == "__main__":
     print("version : {}".format(args.config))
  
     print("SIR {} | PESQ {}".format(
-        torch.sum(SIR_eval)/np.sum(cnt_SIR),
+        torch.sum(SIR_eval[1:])/np.sum(cnt_SIR[1:]),
         torch.sum(PESQ_eval)/np.sum(cnt_PESQ)
     ))
 
     for i in range(4) : 
         SIR_eval[i] /=cnt_SIR[i]
         PESQ_eval[i] /=cnt_PESQ[i]
-        print("n_src :  {} | SIR : {} | PESQ : {}".format(i+1,SIR_eval[i],PESQ_eval[i]))
+        if i != 0 : 
+            print("n_src :  {} | SIR : {} | PESQ : {}".format(i+1,SIR_eval[i],PESQ_eval[i]))
+        else :
+            print("n_src :  {} | SIR : -- | PESQ : {}".format(i+1,PESQ_eval[i]))
+
        
 
 
