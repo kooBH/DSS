@@ -98,7 +98,7 @@ class DatasetDOA(torch.utils.data.Dataset):
               target[n_src:self.n_target,:,:] = target[dup,:,:]
 
 
-        data = {"flat":input,"spec":stft,"target":target,"path_raw":self.list_data[idx],"raw":raw[:,:]}
+        data = {"flat":input,"spec":stft,"target":target,"path_raw":self.list_data[idx],"raw":raw[:,:],"n_src":n_src}
 
         return data
 
