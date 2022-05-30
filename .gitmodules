@@ -10,3 +10,6 @@
 [submodule "MATLAB/MLDR"]
 	path = MATLAB/MLDR
 	url = https://github.com/kooBH/MLDR.git
+[submodule "MATLAB/pesq-mex"]
+	path = MATLAB/pesq-mex
+	url = https://github.com/ludlows/pesq-mex.git
