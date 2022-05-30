@@ -89,7 +89,8 @@ if __name__ == '__main__':
     test_loader = torch.utils.data.DataLoader(dataset=dataset_test,batch_size=batch_size,shuffle=False,num_workers=num_workers)
 
     model = cRFConvTasNet(
-        L=hp.model.l_filter,
+        L_t=hp.model.l_filter_t,
+        L_f=hp.model.l_filter_f,
         f_ch=hp.model.d_feature,
         n_fft=hp.model.n_fft,
         mask=hp.model.activation,
@@ -132,7 +133,8 @@ if __name__ == '__main__':
         raise Exception("Unsupported sceduler type")
 
     N = n_target
-    L = hp.model.l_filter
+    L_t = hp.model.l_filter_t
+    L_f = hp.model.l_filter_f
     C = hp.data.n_channel
     F = int(hp.model.n_fft/2 + 1)
     T = hp.data.n_frame
@@ -150,7 +152,7 @@ if __name__ == '__main__':
             
             ## run model
             feature = batch_data['flat'].to(device)
-            # output = [B,C, 2*L+1,2*L+1, n_hfft, Time]
+            # output = [B,C, 2*L_f+1,2*L_t+1, n_hfft, Time]
             filter = model(feature)
 
             ## filtering
@@ -165,16 +167,16 @@ if __name__ == '__main__':
             Would it be a trouble? 
             """
             # dim of pad start from last dim
-            input_alt = torch.nn.functional.pad(input,pad=(L,L,L,L) ,mode="constant", value=0)
+            input_alt = torch.nn.functional.pad(input,pad=(L_t,L_t,L_f,L_f) ,mode="constant", value=0)
             output = torch.zeros((input.shape[0],N,C,F,T),dtype=torch.cfloat).to(device)
 
             ## TODO : there should be fancier way to do this.
-            for w in range(2*L+1) : 
-                for h in range(2*L+1):
+            for t in range(2*L_t+1) : 
+                for f in range(2*L_f+1):
                     for n in range(N) : 
                         output[:,n,:,:,:] += torch.mul(
-                            input_alt[:,:,w:F-2*L+2+w,h:T-2*L+2+h],
-                            filter[:,n,:,w,h,:,:]
+                            input_alt[: , : , f:F+f , t:T+t ],
+                            filter[:,n,:,f,t,:,:]
                             )
             
             # iSTFT
@@ -230,15 +232,15 @@ if __name__ == '__main__':
                 input = batch_data['spec'].to(device)
        
                 # dim of pad start from last dim
-                input_alt = torch.nn.functional.pad(input,pad=(L,L,L,L) ,mode="constant", value=0)
+                input_alt = torch.nn.functional.pad(input,pad=(L_t,L_t,L_f,L_f) ,mode="constant", value=0)
                 output = torch.zeros((input.shape[0],N,C,F,T),dtype=torch.cfloat).to(device)
 
-                for w in range(2*L+1) : 
-                    for h in range(2*L+1):
+                for t in range(2*L_t+1) : 
+                    for f in range(2*L_f+1):
                         for n in range(N) : 
                             output[:,n,:,:,:] += torch.mul(
-                                input_alt[:,:,w:F-2*L+2+w,h:T-2*L+2+h],
-                                filter[:,n,:,w,h,:,:]
+                                input_alt[: , : , f:F+f, t:T+t ],
+                                filter[:,n,:,f,t,:,:]
                                 )
                 # iSTFT
                 output_raw = torch.zeros((input.shape[0],N,C,batch_data['target'].shape[-1])).to(device)

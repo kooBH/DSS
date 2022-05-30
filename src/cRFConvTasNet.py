@@ -26,7 +26,8 @@ EPS = 1e-13
 """
 class cRFConvTasNet(nn.Module):
     def __init__(self,
-    L=1,
+    L_t=1,
+    L_f=1,
     c_in=4,
     n_target=4,
     f_ch=256,
@@ -53,7 +54,8 @@ class cRFConvTasNet(nn.Module):
         print("{}::dim_input : {}".format(self.__class__.__name__,dim_input))
 
         self.C = c_in
-        self.L = L
+        self.L_t = L_t
+        self.L_f = L_f
         self.F = n_hfft
 
         # stack of two successive TCN bolck 2^0 to 2^7 dialation
@@ -84,7 +86,7 @@ class cRFConvTasNet(nn.Module):
         # L = 0 : cBM
         # L > 0 : cRF
         # n_target * n_channel * freq * filter * complex 
-        dim_output = n_target * c_in * n_hfft * ((2*L+1)**2) * 2
+        dim_output = n_target * c_in * n_hfft * ((2*L_t+1)*(2*L_f+1)) * 2
         conv_output = nn.Conv1d(
             f_ch,
             dim_output,
@@ -117,7 +119,7 @@ class cRFConvTasNet(nn.Module):
         filter = self.net(x)
 
        # [B,N, C, filter, n_hfft, Time, 2(complex)]
-        filter = torch.reshape(filter,(B,self.N,self.C, (2*self.L+1),(2*self.L+1),self.F,T,2))
+        filter = torch.reshape(filter,(B,self.N,self.C, (2*self.L_f+1),(2*self.L_t+1),self.F,T,2))
 
         # Return in Complex type
         return torch.view_as_complex(filter)
@@ -351,7 +353,8 @@ if __name__ == "__main__":
     F = 257
 
     net = cRFConvTasNet(
-        L=L,
+        L_t=L,
+        L_f=L,
         n_target = N
     )
     x = torch.rand(B,(C + N*2)*F,T)
