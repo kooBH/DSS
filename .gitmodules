@@ -13,3 +13,6 @@
 [submodule "MATLAB/pesq-mex"]
 	path = MATLAB/pesq-mex
 	url = https://github.com/ludlows/pesq-mex.git
+[submodule "src/UNet"]
+	path = src/UNet
+	url = https://github.com/kooBH/UNet.git

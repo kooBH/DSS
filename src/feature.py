@@ -9,6 +9,10 @@ def LogPowerSpectral(stft):
     log_power_spectral = 10*torch.log10(1+power_spectral)
     return log_power_spectral
 
+def Mag(stft):
+    mag = torch.abs(stft)
+    return mag
+
 """ Inter-phase difference
 Difference with first channel
 (2018)Recognizing Overlapped Speech in Meetings: A Multichannel Separation Approach Using Neural Networks
@@ -20,8 +24,15 @@ stft : [C, F, T, X]
 IPD : [C-1, F, T]
 
 """
-def InterPhaseDifference(stft):
+def InterPhaseDifference(stft,full=False):
     d = stft[1:,:,:]/(stft[0,:,:]+1e-13)
+    
+    if full :
+        for i in range(1,stft.shape[0]) :
+            t = stft[i+1:,:,:]/(stft[i,:,:]+1e-13)
+
+            d = torch.cat((d,t),dim=0)
+
     IPD =  torch.angle(d)
     return IPD
 
@@ -29,15 +40,25 @@ def InterPhaseDifference(stft):
 def NormalizedIPD(stft):
     raise Exception("NormalizedIPD::Not Implemented")
 
-def cosIPD(stft):
-    d = stft[1:,:,:]/(stft[0,:,:]+1e-13)
-    IPD =  torch.angle(d)
+def cosIPD(stft,full=False):
+    IPD =  InterPhaseDifference(stft,full)
     return torch.cos(IPD)
 
-def sinIPD(stft):
-    d = stft[1:,:,:]/(stft[0,:,:]+1e-13)
-    IPD =  torch.angle(d)
+def sinIPD(stft,full=False):
+    IPD =  InterPhaseDifference(stft,full)
     return torch.sin(IPD)
+
+def cossinIPD(stft,full=False):
+    cos = cosIPD(stft,full)
+    sin = sinIPD(stft,full)
+
+    return torch.concat((cos,sin))
+
+
+
+
+
+
 
 
 """Angle Feauture
@@ -65,14 +86,15 @@ mic_pos : [C,3]
 + return
 AF : [N,C,F,T]
 """
-def AngleFeature(stft,angle,mic_pos,fs=16000,complex=False,dist=1.0):
+def AngleFeature(stft,angle,mic_pos,fs=16000,complex=False,dist=100.0):
     # F : n_hfft
     C,F,T = stft.shape 
     N,_,_ = angle.shape
 
     ss = 340.3
     pi = 3.141592653589793
-    n_fft = 2*F+1
+    n_fft = 2*F-2
+    #n_fft = 2*F+1
 
     ## location of sources
     loc_src = torch.zeros(N,T,3)
@@ -80,15 +102,25 @@ def AngleFeature(stft,angle,mic_pos,fs=16000,complex=False,dist=1.0):
     loc_src[:,:,1] = dist*torch.sin((90-angle[:,:,0])/180*pi)*torch.sin((90-angle[:,:,1])/180*pi)
     loc_src[:,:,2] = dist*torch.cos((90-angle[:,:,1])/180*pi)
 
+
     # TDOA
     TDOA = torch.zeros(N,C,T)
+
     for i in range(C) : 
-        TDOA[:,i,:] = torch.norm(mic_pos[i,:] - loc_src[:,:,:] )
+            TDOA[:,i,:] = torch.norm(mic_pos[i,:] - loc_src[:,:,:] )
 
     ## Steering vector
     SV = torch.zeros(N,C,F,T, dtype=torch.cfloat)
     for i in range(F):
-        SV[:,:,i,:] = torch.exp(1j*2*pi*i/n_fft*TDOA*fs/ss)
+        SV[:,:,i,:] = torch.exp(-1j*2*pi*i/n_fft*TDOA*fs/ss)
+        #[M] st(:,freq) = st(:,freq).*sqrt(nSensor/norm(st(:,freq)))
+
+        # normalization per channel
+        for i_N in range(N) : 
+            for i_T in range(T) : 
+                SV[i_N,:,i,i_T] = SV[i_N,:,i,i_T]/torch.sqrt((C)/torch.norm(SV[i_N,:,i,i_T]))
+        #SV[:,:,i,:] = torch.exp(1j*2*pi*i/n_fft*TDOA*fs/ss)
+    # norm
 
 
     """

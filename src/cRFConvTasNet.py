@@ -30,6 +30,7 @@ class cRFConvTasNet(nn.Module):
     L_f=1,
     c_in=4,
     n_target=4,
+    n_feature=12,
     f_ch=256,
     n_fft=512,
     mask="Sigmoid",
@@ -47,7 +48,7 @@ class cRFConvTasNet(nn.Module):
         # 256 1x1 kernel conv
         n_hfft = int(n_fft/2 + 1)
         
-        dim_input = (1 + c_in-1 + 2*n_target) * n_hfft
+        dim_input = n_feature * n_hfft
         input_layer = nn.Conv1d(dim_input,f_ch,1)
         self.N = n_target
 

@@ -5,21 +5,21 @@ import torchaudio
 import os
 import numpy as np
 
-from dataset import DatasetDOA
+from dataset import DatasetDOA,get_n_feature
 from cRFConvTasNet import cRFConvTasNet
+from UNet.UNet import UNet
 
 from ptUtils.hparams import HParam
 from ptUtils.writer import MyWriter
-from ptUtils.Loss import mSDRLoss,wSDRLoss,SISDRLoss,iSDRLoss
+from ptUtils.Loss import mSDRLoss,wSDRLoss,SISDRLoss,iSDRLoss,wMSELoss
 from ptUtils.metric import SIR,PESQ
 
-def get_loss(hp,target,output,criterion,device,raw=None): 
-    N = hp.model.n_target
+def get_wav_loss(hp,target,output_raw,n_src,criterion,device,raw=None): 
     C = hp.data.n_channel
 
     loss = torch.tensor(0.0,requires_grad=True).to(device)
 
-    if not hp.loss.cross : 
+    if hp.model.ADPIT : 
         for l in range(N) : 
             for c in range(C) : 
                 if hp.loss.type == "wSDRLoss":
@@ -27,20 +27,96 @@ def get_loss(hp,target,output,criterion,device,raw=None):
                 else : 
                     loss += Loss(output_raw[:,l,c,:],target[:,l,c,:]).to(device)
     else : 
-        for l in range(N) : 
-            for l2 in range(N) : 
-                for c in range(C) : 
-                    if hp.loss.type == "wSDRLoss":
-                        val_loss =  Loss(output_raw[:,l,c,:],raw[:,c,:],target[:,l2,c,:],alpha = hp.loss.wSDRLoss.alpha).to(device)
-                    else : 
-                        val_loss = Loss(output_raw[:,l,c,:],target[:,l2,c,:]).to(device)
-                    
-                    if l == l2 : 
-                        loss += val_loss
-                    else :
-                        loss -= val_loss
+        for b in range(target.shape[0]) : 
+            N_temp = n_src[b]
+            for c in range(C) : 
+                if hp.loss.type == "wSDRLoss":
+                    loss +=  Loss(output_raw[b,:N_temp,c,:],raw[b,c,:],target[b,:N_temp,c,:],alpha = hp.loss.wSDRLoss.alpha).to(device)
+                else : 
+                    loss += Loss(output_raw[b,:N_temp,c,:],target[b,:N_temp,c,:]).to(device)
 
     return loss
+
+def get_spectral_loss(hp,target_spec,output_spec,n_src,criterion,device): 
+    C = hp.data.n_channel
+
+    loss = torch.tensor(0.0,requires_grad=True).to(device)
+
+    if hp.model.ADPIT : 
+        for l in range(N) : 
+            for c in range(C) : 
+                if hp.loss.type == "wMSELoss" : 
+                    loss += Loss(output_spec[:,l,c,:],target_spec[:,l,c,:],alpha=hp.loss.wMSELoss.alpha).to(device)
+                else :
+                    loss += Loss(output_spec[:,l,c,:],target_spec[:,l,c,:]).to(device)
+    else : 
+        for b in range(target.shape[0]) : 
+            N_temp = n_src[b]
+            for c in range(C) : 
+                if hp.loss.type == "wMSELoss" : 
+                    loss += Loss(output_spec[b,:N_temp,c,:],target_spec[b,:N_temp,c,:],alpha=hp.loss.wMSELoss.alpha).to(device)
+                else :
+                    loss += Loss(output_spec[b,:N_temp,c,:],target_spec[b,:N_temp,c,:]).to(device)
+    return loss
+
+def run(model,feature,input,target,raw,n_src, ret_output=False) :
+
+    # output = [B,C, 2*L_f+1,2*L_t+1, n_hfft, Time]
+    filter = model(feature)
+
+    ## filtering
+    """
+    torch.nn.functional.pad(input, pad, mode='constant', value=0.0)
+    https://pytorch.org/docs/stable/generated/torch.nn.functional.pad.html
+
+    " When using the CUDA backend, this operation may induce nondeterministic behaviour in its backward pass that is not easily switched off. Please see the notes on Reproducibility for background."
+
+    Would it be a trouble? 
+    """
+    # dim of pad start from last dim
+    input_alt = torch.nn.functional.pad(input,pad=(L_t,L_t,L_f,L_f) ,mode="constant", value=0)
+    output = torch.zeros((input.shape[0],N,C,F,T),dtype=torch.cfloat).to(device)
+
+    ## TODO : there should be fancier way to do this.
+    for t in range(2*L_t+1) : 
+        for f in range(2*L_f+1):
+            for n in range(N) : 
+                output[:,n,:,:,:] += torch.mul(
+                    input_alt[: , : , f:F+f , t:T+t ],
+                    filter[:,n,:,f,t,:,:]
+                    )
+    
+    # iSTFT
+    output_raw = torch.zeros((input.shape[0],N,C,target.shape[-1])).to(device)
+
+    # torch STFT/iSTFT
+    for j in range(N) :
+        for k in range(output_raw.shape[2]) : 
+        # reducing target length due to STFT 1 frame mismatch
+            output_raw[:,j,k,:-shift] = torch.istft(output[:,j,k,:,:],n_fft = hp.model.n_fft)
+
+    ## Normalization
+    denom_max = torch.max(torch.abs(output_raw),dim=3)[0]
+    denom_max = torch.unsqueeze(denom_max,dim=-1)
+    output_raw = output_raw/(denom_max + 1e-7)
+
+    ## Loss
+    if hp.loss.type == "wSDRLoss" : 
+        loss = get_wav_loss(hp,target,output_raw,n_src,Loss,device,raw)
+    elif hp.loss.type == "wMSELoss" : 
+        target_spec = torch.zeros_like(output).to(device)
+        for i in range(output.shape[0]) : 
+            for j in range(N) : 
+                target_spec[i,j,:,:,:] = torch.stft(target[i,j,:,:],n_fft=hp.model.n_fft,return_complex=True)[:,:,:-1]
+
+        loss = get_spectral_loss(hp,target_spec,output,n_src,Loss,device)
+    else : 
+        raise Exception("ERROR::run():The loss type is not supported | {}".format(hp.loss.type))
+
+    if not ret_output : 
+        return loss
+    else : 
+        return loss, output_raw
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -53,9 +129,11 @@ if __name__ == '__main__':
     parser.add_argument('--device','-d',type=str,required=False,default="cuda:0")
     args = parser.parse_args()
 
+    global hp
     hp = HParam(args.config)
     print("NOTE::Loading configuration : "+args.config)
 
+    global device, n_target
     device = args.device
     version = args.version_name
     torch.cuda.set_device(device)
@@ -77,29 +155,71 @@ if __name__ == '__main__':
 
     writer = MyWriter(hp, log_dir)
 
+    n_feature = get_n_feature(hp.data.n_channel,hp.model.n_target, 
+    hp.model.mono, 
+    hp.model.phase,
+    hp.model.phase_full
+    )
+
+##  Model
+    if hp.model.type == "ConvTasNet":
+        model = cRFConvTasNet(
+            n_feature=n_feature,
+            L_t=hp.model.l_filter_t,
+            L_f=hp.model.l_filter_f,
+            f_ch=hp.model.d_feature,
+            n_fft=hp.model.n_fft,
+            mask=hp.model.activation,
+            n_target=n_target
+        ).to(device)
+        flat = True
+    elif hp.model.type == "UNet" :
+        model = UNet(
+            input_channels=n_feature,
+            output_channels=n_target,
+            L_t=hp.model.l_filter_t,
+            L_f=hp.model.l_filter_f,
+            n_fft=hp.model.n_fft,
+            mask_activation=hp.model.activation,
+            device=device,
+            complex=False
+        ).to(device)
+        flat = False
+    else :
+        raise Exception("ERROR:: Unknown Model {}".format(hp.model.type))
+
+    if not args.chkpt == None : 
+        print('NOTE::Loading pre-trained model : '+ args.chkpt)
+        model.load_state_dict(torch.load(args.chkpt, map_location=device))
+
     ## Dataloader
     #dataset_train = DatasetDOA(hp.data.root+"/train")
     #dataset_test  = DatasetDOA(hp.data.root+"/test")
-    dataset_train = DatasetDOA(hp.data.root_train,n_target=n_target)
-    dataset_test  = DatasetDOA(hp.data.root_test,n_target=n_target)
+    dataset_train = DatasetDOA(hp.data.root_train,
+    IPD=hp.model.phase,
+    n_target=n_target,
+    flat=flat,
+    mono = hp.model.mono,
+    LPS = hp.model.LPS,
+    full_phase=hp.model.phase_full,
+    only_azim=hp.model.only_azim,
+    ADPIT=hp.model.ADPIT
+    )
+    dataset_test  = DatasetDOA(hp.data.root_test,
+    IPD=hp.model.phase,
+    n_target=n_target,
+    flat=flat,
+    mono = hp.model.mono,
+    LPS = hp.model.LPS,
+    full_phase=hp.model.phase_full,
+    only_azim=hp.model.only_azim,
+    ADPIT=hp.model.ADPIT
+    )
 
     print("len_trainset : {}".format(len(dataset_train)))
 
     train_loader = torch.utils.data.DataLoader(dataset=dataset_train,batch_size=batch_size,shuffle=True,num_workers=num_workers)
     test_loader = torch.utils.data.DataLoader(dataset=dataset_test,batch_size=batch_size,shuffle=False,num_workers=num_workers)
-
-    model = cRFConvTasNet(
-        L_t=hp.model.l_filter_t,
-        L_f=hp.model.l_filter_f,
-        f_ch=hp.model.d_feature,
-        n_fft=hp.model.n_fft,
-        mask=hp.model.activation,
-        n_target=n_target
-    ).to(device)
-
-    if not args.chkpt == None : 
-        print('NOTE::Loading pre-trained model : '+ args.chkpt)
-        model.load_state_dict(torch.load(args.chkpt, map_location=device))
 
     ## Loss ##
     if hp.loss.type == "wSDRLoss":
@@ -110,6 +230,8 @@ if __name__ == '__main__':
         Loss = SISDRLoss
     elif hp.loss.type =="iSDRLoss":
         Loss = iSDRLoss
+    elif hp.loss.type =="wMSELoss":
+        Loss = wMSELoss
     else :
         raise Exception("ERROR::unsupported loss : {}".format(hp.loss.type))
 
@@ -132,12 +254,14 @@ if __name__ == '__main__':
     else :
         raise Exception("Unsupported sceduler type")
 
+    global N, L_t, L_f, C,F,T,shift,n_fft
     N = n_target
     L_t = hp.model.l_filter_t
     L_f = hp.model.l_filter_f
     C = hp.data.n_channel
     F = int(hp.model.n_fft/2 + 1)
     T = hp.data.n_frame
+    n_fft = hp.model.n_fft
 
     shift = int(hp.model.n_fft/4)
 
@@ -152,52 +276,14 @@ if __name__ == '__main__':
             
             ## run model
             feature = batch_data['flat'].to(device)
-            # output = [B,C, 2*L_f+1,2*L_t+1, n_hfft, Time]
-            filter = model(feature)
 
-            ## filtering
             # [B,C,F,T]
             input = batch_data['spec'].to(device)
-            """
-            torch.nn.functional.pad(input, pad, mode='constant', value=0.0)
-            https://pytorch.org/docs/stable/generated/torch.nn.functional.pad.html
-
-            " When using the CUDA backend, this operation may induce nondeterministic behaviour in its backward pass that is not easily switched off. Please see the notes on Reproducibility for background."
-
-            Would it be a trouble? 
-            """
-            # dim of pad start from last dim
-            input_alt = torch.nn.functional.pad(input,pad=(L_t,L_t,L_f,L_f) ,mode="constant", value=0)
-            output = torch.zeros((input.shape[0],N,C,F,T),dtype=torch.cfloat).to(device)
-
-            ## TODO : there should be fancier way to do this.
-            for t in range(2*L_t+1) : 
-                for f in range(2*L_f+1):
-                    for n in range(N) : 
-                        output[:,n,:,:,:] += torch.mul(
-                            input_alt[: , : , f:F+f , t:T+t ],
-                            filter[:,n,:,f,t,:,:]
-                            )
-            
-            # iSTFT
-            output_raw = torch.zeros((input.shape[0],N,C,batch_data['target'].shape[-1])).to(device)
-
-            # torch STFT/iSTFT
-            for j in range(output_raw.shape[1]) :
-                for k in range(output_raw.shape[2]) : 
-                # reducing target length due to STFT 1 frame mismatch
-                    output_raw[:,j,k,:-shift] = torch.istft(output[:,j,k,:,:],n_fft = hp.model.n_fft)
-
-            ## Normalization
-            denom_max = torch.max(torch.abs(output_raw),dim=3)[0]
-            denom_max = torch.unsqueeze(denom_max,dim=-1)
-            output_raw = output_raw/(denom_max + 1e-7)
-
-            ## Loss
             target = batch_data['target'].to(device)
             raw = batch_data['raw'].to(device)
+            n_src = batch_data['n_src'].to(device)
 
-            loss = get_loss(hp,target,output_raw,Loss,device,raw)
+            loss = run(model,feature,input,target,raw,n_src,ret_output=False)
 
             optimizer.zero_grad()
             loss.backward()
@@ -222,44 +308,15 @@ if __name__ == '__main__':
 
             test_loss = torch.tensor(0.0,requires_grad=True)
             for i, (batch_data) in enumerate(test_loader):
+
                 # run model
                 feature = batch_data['flat'].to(device)
-                # output = [B,C, 2*L+1,2*L+1, n_hfft, Time]
-                filter = model(feature)
-
-                ## filtering
-                # [B,C,F,T]
                 input = batch_data['spec'].to(device)
-       
-                # dim of pad start from last dim
-                input_alt = torch.nn.functional.pad(input,pad=(L_t,L_t,L_f,L_f) ,mode="constant", value=0)
-                output = torch.zeros((input.shape[0],N,C,F,T),dtype=torch.cfloat).to(device)
-
-                for t in range(2*L_t+1) : 
-                    for f in range(2*L_f+1):
-                        for n in range(N) : 
-                            output[:,n,:,:,:] += torch.mul(
-                                input_alt[: , : , f:F+f, t:T+t ],
-                                filter[:,n,:,f,t,:,:]
-                                )
-                # iSTFT
-                output_raw = torch.zeros((input.shape[0],N,C,batch_data['target'].shape[-1])).to(device)
-
-                # torch does not supprot batch STFT/iSTFT
-                for j in range(output_raw.shape[1]) :
-                    for k in range(output_raw.shape[2]) : 
-                    # reducing target length due to STFT 1 frame mismatch
-                        output_raw[:,j,k,:-shift] = torch.istft(output[:,j,k,:,:],n_fft = hp.model.n_fft)
-
-                ## Normalization
-                denom_max = torch.max(torch.abs(output_raw),dim=3)[0]
-                denom_max = torch.unsqueeze(denom_max,dim=-1)
-                output_raw = output_raw/(denom_max + 1e-7)
-
-                ## Loss
                 target = batch_data['target'].to(device)
                 raw = batch_data['raw'].to(device)
-                loss = get_loss(hp,target,output_raw,Loss,device,raw)
+                n_src = batch_data['n_src'].to(device)
+
+                loss,output_raw = run(model,feature,input,target,raw,n_src,ret_output=True)
 
                 """ Too Slow
                 ## Metric
@@ -285,12 +342,13 @@ if __name__ == '__main__':
                 scheduler.step(test_loss)
 
             ## Log 
+            np.random.seed(int.from_bytes(os.urandom(4), byteorder='little'))
             idx_plot = np.random.randint(input.shape[0])
 
             writer.log_value(test_loss,step,'test loss : ' + hp.loss.type)
 
-            SIR_eval /=cnt_SIR
-            PESQ_eval /=cnt_PESQ
+            #SIR_eval /=cnt_SIR
+            #PESQ_eval /=cnt_PESQ
 
             #writer.log_value(SIR_eval,step,"SIR")
             #writer.log_value(PESQ_eval,step,"PESQ")
