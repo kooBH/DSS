@@ -29,12 +29,14 @@ class cRFConvTasNet(nn.Module):
     L_t=1,
     L_f=1,
     c_in=4,
+    c_out=1,
     n_target=4,
     n_feature=12,
     f_ch=256,
     n_fft=512,
     mask="Sigmoid",
-    TCN_activation="None"
+    TCN_activation="None",
+    hp=None
     ):
         """
             L : length of cRF
@@ -55,6 +57,7 @@ class cRFConvTasNet(nn.Module):
         print("{}::dim_input : {}".format(self.__class__.__name__,dim_input))
 
         self.C = c_in
+        self.c_out = c_out
         self.L_t = L_t
         self.L_f = L_f
         self.F = n_hfft
@@ -87,7 +90,7 @@ class cRFConvTasNet(nn.Module):
         # L = 0 : cBM
         # L > 0 : cRF
         # n_target * n_channel * freq * filter * complex 
-        dim_output = n_target * c_in * n_hfft * ((2*L_t+1)*(2*L_f+1)) * 2
+        dim_output = n_target * c_out * n_hfft * ((2*L_t+1)*(2*L_f+1)) * 2
         conv_output = nn.Conv1d(
             f_ch,
             dim_output,
@@ -97,7 +100,7 @@ class cRFConvTasNet(nn.Module):
         if mask == "Sigmoid" : 
             activation_output= nn.Sigmoid()
         elif mask == "Softplus":
-            activation_output= nn.Softplus()
+            activation_output= nn.Softplus(threshold=hp.model.Softplus.threshold)
         elif mask == "Tanh" : 
             activation_output = nn.Tanh()
         else :
@@ -120,7 +123,7 @@ class cRFConvTasNet(nn.Module):
         filter = self.net(x)
 
        # [B,N, C, filter, n_hfft, Time, 2(complex)]
-        filter = torch.reshape(filter,(B,self.N,self.C, (2*self.L_f+1),(2*self.L_t+1),self.F,T,2))
+        filter = torch.reshape(filter,(B,self.N,self.c_out, (2*self.L_f+1),(2*self.L_t+1),self.F,T,2))
 
         # Return in Complex type
         return torch.view_as_complex(filter)

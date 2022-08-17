@@ -32,6 +32,8 @@ n_output = args.n_output
 
 ## PATH
 target_list = [x for x in glob.glob(os.path.join(root,'**','*.wav'),recursive=True)]
+#target_list += [x for x in glob.glob(os.path.join("/home/data/kbh/CHiME4/isolated_ext/","tr*","*.CH1.Clean.wav"))]
+
 print("Target Files : {}".format(len(target_list)))
 
 ## Gen List, 
@@ -53,7 +55,17 @@ def process(idx):
     #generate(output_root,list_sources[idx],idx,50,shift=128,match="1sec",fix=True,max_SIR=5,max_RT60=0.15,norm_signals=False)
 
     ## 2022-05-24 v5 : more hard
-    generate(output_root,list_sources[idx],idx,50,shift=128,match="1sec",fix=True,max_SIR=10,max_RT60=0.8,norm_signals=False)
+    #generate(output_root,list_sources[idx],idx,50,shift=128,match="1sec",fix=True,max_SIR=10,max_RT60=0.8,norm_signals=False)
+
+    ## 2022-05-30 v6 : more speech , less SIR
+    #generate(output_root,list_sources[idx],idx,50,shift=128,match="1sec",fix=False,max_SIR=5,max_RT60=0.8,norm_signals=False)
+
+    ## 2022-06-08 v7 : too short ? 
+    #generate(output_root,list_sources[idx],idx,50,shift=128,match="4sec",fix=True,max_SIR=10,max_RT60=0.8,norm_signals=False)
+
+    ## 2022-07-03 v8 : Renewal 
+    generate(output_root,list_sources[idx],idx,50,shift=128,match="4sec",fix=True,max_SIR=10,max_RT60=0.8,norm_signals=False)
+
 
 
 

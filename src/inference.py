@@ -9,6 +9,7 @@ from tqdm import tqdm
 
 from dataset import DatasetDOA
 from cRFConvTasNet import cRFConvTasNet
+from cRFUNet import UNet10, UNet20
 from dataset import preprocess,get_n_feature,deemphasis
 from ptUtils.hparams import HParam
 
@@ -48,19 +49,6 @@ if __name__ == "__main__":
 
     os.makedirs(args.dir_output,exist_ok=True)
 
-    dataset = DatasetDOA(
-        args.dir_input,
-        n_target,
-        IPD=hp.model.phase,
-        mono = hp.model.mono,
-        LPS = hp.model.LPS,
-        full_phase=hp.model.phase_full,
-        preemphasis=hp.data.preemphasis ,
-        preemphasis_coef =hp.data.preemphasis_coef ,
-        preemphasis_order =hp.data.preemphasis_order
-        )
-    loader = torch.utils.data.DataLoader(dataset=dataset,batch_size=batch_size,num_workers=num_workers)
-
     n_feature = get_n_feature(
         hp.data.n_channel,
         hp.model.n_target, 
@@ -69,15 +57,59 @@ if __name__ == "__main__":
         full_phase = hp.model.phase_full
         )
 
-    model = cRFConvTasNet(
-        n_feature=n_feature,
-        L_t=hp.model.l_filter_t,
-        L_f=hp.model.l_filter_f,
-        f_ch=hp.model.d_feature,
-        n_fft=hp.model.n_fft,
-        mask=hp.model.activation,
-        n_target=n_target
-    ).to(device)
+    ##  Model
+    if hp.model.type == "ConvTasNet":
+        model = cRFConvTasNet(
+            n_feature=n_feature,
+            L_t=hp.model.l_filter_t,
+            L_f=hp.model.l_filter_f,
+            f_ch=hp.model.d_feature,
+            n_fft=hp.model.n_fft,
+            mask=hp.model.activation,
+            n_target=n_target,
+            hp=hp
+        ).to(device)
+        flat = True
+    elif hp.model.type == "UNet10" :
+        model = UNet10(
+            c_in=n_feature,
+            c_out=n_target,
+            L_t=hp.model.l_filter_t,
+            L_f=hp.model.l_filter_f,
+            n_fft=hp.model.n_fft,
+            device=device,
+            mask=hp.model.activation
+        ).to(device)
+        flat = False
+    elif hp.model.type == "UNet20" :
+        model = UNet20(
+            c_in=n_feature,
+            c_out=n_target,
+            L_t=hp.model.l_filter_t,
+            L_f=hp.model.l_filter_f,
+            n_fft=hp.model.n_fft,
+            device=device,
+            mask=hp.model.activation
+        ).to(device)
+        flat = False
+    else :
+        raise Exception("ERROR:: Unknown Model {}".format(hp.model.type))
+
+    dataset = DatasetDOA(
+        args.dir_input,
+        n_target,
+        IPD=hp.model.phase,
+        mono = hp.model.mono,
+        LPS = hp.model.LPS,
+        full_phase=hp.model.phase_full,
+        #preemphasis=hp.data.preemphasis ,
+        #preemphasis_coef =hp.data.preemphasis_coef ,
+        #preemphasis_order =hp.data.preemphasis_order,
+        flat=flat,
+        only_azim=hp.model.only_azim,
+        ADPIT=hp.model.ADPIT
+        )
+    loader = torch.utils.data.DataLoader(dataset=dataset,batch_size=batch_size,num_workers=num_workers)
 
     model.load_state_dict(torch.load(args.chkpt, map_location=device))
 
@@ -87,7 +119,7 @@ if __name__ == "__main__":
         test_loss =0.
         for i, (batch_data) in tqdm(enumerate(loader),total=len(dataset)):
             # run model
-            feature = batch_data['flat'].to(device)
+            feature = batch_data['flat'].float().to(device)
             # output = [B,C, 2*L+1,2*L+1, n_hfft, Time]
             filter = model(feature)
 

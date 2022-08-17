@@ -7,6 +7,7 @@ import numpy as np
 
 from dataset import DatasetDOA,get_n_feature
 from cRFConvTasNet import cRFConvTasNet
+from cRFUNet import UNet10, UNet20
 from UNet.UNet import UNet
 
 from ptUtils.hparams import HParam
@@ -18,10 +19,10 @@ def get_wav_loss(hp,target,output_raw,n_src,criterion,device,raw=None):
     C = hp.data.n_channel
 
     loss = torch.tensor(0.0,requires_grad=True).to(device)
-
+    
     if hp.model.ADPIT : 
         for l in range(N) : 
-            for c in range(C) : 
+            for c in range(c_out) : 
                 if hp.loss.type == "wSDRLoss":
                     loss +=  Loss(output_raw[:,l,c,:],raw[:,c,:],target[:,l,c,:],alpha = hp.loss.wSDRLoss.alpha).to(device)
                 else : 
@@ -29,7 +30,7 @@ def get_wav_loss(hp,target,output_raw,n_src,criterion,device,raw=None):
     else : 
         for b in range(target.shape[0]) : 
             N_temp = n_src[b]
-            for c in range(C) : 
+            for c in range(c_out) : 
                 if hp.loss.type == "wSDRLoss":
                     loss +=  Loss(output_raw[b,:N_temp,c,:],raw[b,c,:],target[b,:N_temp,c,:],alpha = hp.loss.wSDRLoss.alpha).to(device)
                 else : 
@@ -75,23 +76,23 @@ def run(model,feature,input,target,raw,n_src, ret_output=False) :
     """
     # dim of pad start from last dim
     input_alt = torch.nn.functional.pad(input,pad=(L_t,L_t,L_f,L_f) ,mode="constant", value=0)
-    output = torch.zeros((input.shape[0],N,C,F,T),dtype=torch.cfloat).to(device)
+    output = torch.zeros((input.shape[0],N,c_out,F,T),dtype=torch.cfloat).to(device)
 
     ## TODO : there should be fancier way to do this.
     for t in range(2*L_t+1) : 
         for f in range(2*L_f+1):
             for n in range(N) : 
-                output[:,n,:,:,:] += torch.mul(
-                    input_alt[: , : , f:F+f , t:T+t ],
-                    filter[:,n,:,f,t,:,:]
+                output[:,n,:c_out,:,:] += torch.mul(
+                    input_alt[: , :c_out, f:F+f , t:T+t ],
+                    filter[:,n,:c_out,f,t,:,:]
                     )
     
     # iSTFT
-    output_raw = torch.zeros((input.shape[0],N,C,target.shape[-1])).to(device)
+    output_raw = torch.zeros((input.shape[0],N,c_out,target.shape[-1])).to(device)
 
     # torch STFT/iSTFT
     for j in range(N) :
-        for k in range(output_raw.shape[2]) : 
+        for k in range(c_out) : 
         # reducing target length due to STFT 1 frame mismatch
             output_raw[:,j,k,:-shift] = torch.istft(output[:,j,k,:,:],n_fft = hp.model.n_fft)
 
@@ -120,8 +121,8 @@ def run(model,feature,input,target,raw,n_src, ret_output=False) :
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', '-c', type=str, required=True,
-                        help="yaml for configuration")
+    parser.add_argument('--config', '-c', type=str, required=True,help="yaml for configuration")
+    parser.add_argument('--default', type=str, required=False,default=None,help="base yaml")
     parser.add_argument('--version_name', '-v', type=str, required=True,
                         help="version of current training")
     parser.add_argument('--chkpt',type=str,required=False,default=None)
@@ -130,21 +131,33 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     global hp
-    hp = HParam(args.config)
+    hp = HParam(args.config,args.default)
     print("NOTE::Loading configuration : "+args.config)
 
+    global N, L_t, L_f, C,F,T,shift,n_fft,c_out
     global device, n_target
+
+    n_target = hp.model.n_target
     device = args.device
     version = args.version_name
     torch.cuda.set_device(device)
-
     batch_size = hp.train.batch_size
     num_epochs = hp.train.epoch
     num_workers = hp.train.num_workers
 
     best_loss = 1e7
 
-    n_target = hp.model.n_target
+    N = n_target
+    L_t = hp.model.l_filter_t
+    L_f = hp.model.l_filter_f
+    C = hp.data.n_channel
+    F = int(hp.model.n_fft/2 + 1)
+    T = hp.data.n_frame
+    n_fft = hp.model.n_fft
+    c_out=1
+
+
+
 
     ## load
     modelsave_path = hp.log.root +'/'+'chkpt' + '/' + version
@@ -165,24 +178,36 @@ if __name__ == '__main__':
     if hp.model.type == "ConvTasNet":
         model = cRFConvTasNet(
             n_feature=n_feature,
+            c_out=c_out,
             L_t=hp.model.l_filter_t,
             L_f=hp.model.l_filter_f,
             f_ch=hp.model.d_feature,
             n_fft=hp.model.n_fft,
             mask=hp.model.activation,
-            n_target=n_target
+            n_target=n_target,
+            hp=hp
         ).to(device)
         flat = True
-    elif hp.model.type == "UNet" :
-        model = UNet(
-            input_channels=n_feature,
-            output_channels=n_target,
+    elif hp.model.type == "UNet10" :
+        model = UNet10(
+            c_in=n_feature,
+            c_out=n_target,
             L_t=hp.model.l_filter_t,
             L_f=hp.model.l_filter_f,
             n_fft=hp.model.n_fft,
-            mask_activation=hp.model.activation,
             device=device,
-            complex=False
+            mask=hp.model.activation
+        ).to(device)
+        flat = False
+    elif hp.model.type == "UNet20" :
+        model = UNet20(
+            c_in=n_feature,
+            c_out=n_target,
+            L_t=hp.model.l_filter_t,
+            L_f=hp.model.l_filter_f,
+            n_fft=hp.model.n_fft,
+            device=device,
+            mask=hp.model.activation
         ).to(device)
         flat = False
     else :
@@ -196,30 +221,26 @@ if __name__ == '__main__':
     #dataset_train = DatasetDOA(hp.data.root+"/train")
     #dataset_test  = DatasetDOA(hp.data.root+"/test")
     dataset_train = DatasetDOA(hp.data.root_train,
-    IPD=hp.model.phase,
     n_target=n_target,
-    flat=flat,
-    mono = hp.model.mono,
     LPS = hp.model.LPS,
-    full_phase=hp.model.phase_full,
-    only_azim=hp.model.only_azim,
-    ADPIT=hp.model.ADPIT
+    ADPIT=hp.model.ADPIT,
+    preemphasis_coef =hp.data.preemphasis_coef ,
+    preemphasis_order =hp.data.preemphasis_order,
+    azim_shaking=hp.model.azim_shaking
     )
     dataset_test  = DatasetDOA(hp.data.root_test,
-    IPD=hp.model.phase,
     n_target=n_target,
-    flat=flat,
-    mono = hp.model.mono,
     LPS = hp.model.LPS,
-    full_phase=hp.model.phase_full,
-    only_azim=hp.model.only_azim,
-    ADPIT=hp.model.ADPIT
+    ADPIT=hp.model.ADPIT,
+    preemphasis_coef =hp.data.preemphasis_coef ,
+    preemphasis_order =hp.data.preemphasis_order,
+    azim_shaking=hp.model.azim_shaking
     )
 
     print("len_trainset : {}".format(len(dataset_train)))
 
-    train_loader = torch.utils.data.DataLoader(dataset=dataset_train,batch_size=batch_size,shuffle=True,num_workers=num_workers)
-    test_loader = torch.utils.data.DataLoader(dataset=dataset_test,batch_size=batch_size,shuffle=False,num_workers=num_workers)
+    train_loader = torch.utils.data.DataLoader(dataset=dataset_train,batch_size=batch_size,shuffle=True,num_workers=num_workers,pin_memory=True)
+    test_loader = torch.utils.data.DataLoader(dataset=dataset_test,batch_size=batch_size,shuffle=False,num_workers=num_workers,pin_memory=True)
 
     ## Loss ##
     if hp.loss.type == "wSDRLoss":
@@ -254,32 +275,27 @@ if __name__ == '__main__':
     else :
         raise Exception("Unsupported sceduler type")
 
-    global N, L_t, L_f, C,F,T,shift,n_fft
-    N = n_target
-    L_t = hp.model.l_filter_t
-    L_f = hp.model.l_filter_f
-    C = hp.data.n_channel
-    F = int(hp.model.n_fft/2 + 1)
-    T = hp.data.n_frame
-    n_fft = hp.model.n_fft
+
 
     shift = int(hp.model.n_fft/4)
 
     step = args.step
 
+    print("INFO::Learning")
     for epoch in range(num_epochs) :
         ### TRAIN ####
         model.train()
         train_loss=0
         for i, (batch_data) in enumerate(train_loader):
-            step += batch_data['flat'].shape[0]
+            step += batch_data['feature'].shape[0]
             
             ## run model
-            feature = batch_data['flat'].to(device)
+            feature = batch_data['feature'].to(device)
 
             # [B,C,F,T]
             input = batch_data['spec'].to(device)
             target = batch_data['target'].to(device)
+            target = target[:,:,:c_out,:]
             raw = batch_data['raw'].to(device)
             n_src = batch_data['n_src'].to(device)
 
@@ -310,9 +326,10 @@ if __name__ == '__main__':
             for i, (batch_data) in enumerate(test_loader):
 
                 # run model
-                feature = batch_data['flat'].to(device)
+                feature = batch_data['feature'].to(device)
                 input = batch_data['spec'].to(device)
                 target = batch_data['target'].to(device)
+                target = target[:,:,:c_out,:]
                 raw = batch_data['raw'].to(device)
                 n_src = batch_data['n_src'].to(device)
 

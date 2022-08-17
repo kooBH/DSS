@@ -28,7 +28,7 @@ if __name__ == "__main__":
     parser.add_argument('--n_shift','-s',type=int,required=False,default=60)
     args = parser.parse_args()
 
-    hp = HParam(args.config)
+    hp = HParam(args.config,"config/template.yaml")
     print("NOTE::Loading configuration : "+args.config)
     n_target = hp.model.n_target
     preemphasis=hp.data.preemphasis
@@ -63,7 +63,8 @@ if __name__ == "__main__":
         f_ch=hp.model.d_feature,
         n_fft=hp.model.n_fft,
         mask=hp.model.activation,
-        n_target=n_target
+        n_target=n_target,
+        hp=hp
     ).to(device)
 
     print("LOAD : {}".format(args.chkpt))
@@ -105,7 +106,7 @@ if __name__ == "__main__":
                 raw = raw[:,:-short]
 
             # preemphasis
-            if True : 
+            if False: 
                 t_raw = np.zeros(raw.shape)
                 for i_sample in range(3,raw.shape[1]) :
                         t_raw[:,i_sample] = raw[:,i_sample] -preemphasis_coef*raw[:,i_sample-1] + preemphasis_coef * raw[:,i_sample-1] - preemphasis_coef * raw[:,i_sample-2]
@@ -180,8 +181,9 @@ if __name__ == "__main__":
             stft = torch.unsqueeze(stft,dim=0)
 
             feature = feature.to(device)
-
+            print("model run\n")
             filter =  model(feature.float())
+            print("model done\n")
 
             # Edge processing
 
@@ -211,7 +213,7 @@ if __name__ == "__main__":
 
             # Deemphasis
             #if hp.data.preemphasis :
-            if True :
+            if False :
                 for it_B in range(output_raw.shape[0]) :
                     for it_N in range(N) : 
                         output_raw[it_B,it_N] = (deemphasis(output_raw[it_B,it_N].T,device=device)).T
