@@ -16,3 +16,6 @@
 [submodule "src/UNet"]
 	path = src/UNet
 	url = https://github.com/kooBH/UNet.git
+[submodule "src/espnet"]
+	path = src/espnet
+	url = https://github.com/kooBH/espnet.git
