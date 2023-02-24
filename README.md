@@ -1,11 +1,4 @@
 # DOA-Audio-Separation  
 DNN based Multi-Channel Audio Separation using DOA     
-  
-# I/O    
-+ input : 4-channel, DOA of each target(maximum 4 targets)    
-+ output : Masks for each target or separated audio of each target    
 
-# Evaluation    
-+ SIR  
-+ PESQ  
-
+[LOG](https://docs.google.com/spreadsheets/d/1htpa5VFULefiN-Eg8I1zGhVuTNkIFxOQtjoHgsDsdzY/edit?usp=sharing)
