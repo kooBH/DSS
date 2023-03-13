@@ -1,0 +1,5 @@
+model :
+  type : 'ResUNet'
+---
+loss:
+  type: 'Loss_mag_wav' 

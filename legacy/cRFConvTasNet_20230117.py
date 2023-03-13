@@ -17,6 +17,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from SepFormer import SepFormerSeparator
+
 EPS = 1e-13
 
 """
@@ -36,6 +38,8 @@ class cRFConvTasNet(nn.Module):
     n_fft=512,
     mask="Sigmoid",
     TCN_activation="None",
+    separator="TCN",
+    output_type = "mask",
     hp=None
     ):
         """
@@ -43,7 +47,6 @@ class cRFConvTasNet(nn.Module):
             f_ch : feature channel, default 256
         """
         super(cRFConvTasNet,self).__init__()
-
 
         ## Audio Encoding Network
         # to reduce feature dimmension
@@ -74,14 +77,21 @@ class cRFConvTasNet(nn.Module):
 
         ## separate filter estimatior network
         # two successive TCN blcoks 2^0 to 2^7 dialation
-        filter_estimator = TCN(
-            c_in = f_ch,
-            c_out= f_ch * 2,
-            kernel = 3,
-            n_successive =2,
-            n_block = 8,
-            TCN_activation=TCN_activation
-        )
+        if separator == "TCN" : 
+            filter_estimator = TCN(
+                c_in = f_ch,
+                c_out= f_ch * 2,
+                kernel = 3,
+                n_successive =2,
+                n_block = 8,
+                TCN_activation=TCN_activation
+            )
+        elif separator == "SepFormer" : 
+            # Default params
+            filter_estimator = SepFormerSeparator(f_ch,n_target,4,250,2,4)
+        else :
+            raise Exception("ERORR::Unknown separator {}".format(separator))
+            
         """
         + Complex Ratio Filter
         W. Mack and E. A. P. Habets, "Deep Filtering: Signal Extraction and Reconstruction Using Complex Time-Frequency Filters," in IEEE Signal Processing Letters, vol. 27, pp. 61-65, 2020, doi: 10.1109/LSP.2019.2955818.
@@ -90,7 +100,17 @@ class cRFConvTasNet(nn.Module):
         # L = 0 : cBM
         # L > 0 : cRF
         # n_target * n_channel * freq * filter * complex 
-        dim_output = n_target * c_out * n_hfft * ((2*L_t+1)*(2*L_f+1)) * 2
+        self.output_type = output_type
+        if output_type == "mask" : 
+            dim_output = n_target * c_out * n_hfft * ((2*L_t+1)*(2*L_f+1)) * 2
+        elif output_type == "filter" :
+            if c_out != 1 : 
+                raise Exception("ERROR::cRFConvTasNet::filter output must be c_out == 1 for now")
+            dim_output = n_target * c_in * n_hfft
+
+        else :
+            raise Exception("ERROR::Unknown type of output {}".format(output_type))
+
         conv_output = nn.Conv1d(
             f_ch,
             dim_output,
@@ -105,7 +125,7 @@ class cRFConvTasNet(nn.Module):
             activation_output = nn.Tanh()
         else :
             raise Exception("ERROR::{}:Unknown type of mask : {}".format(__name__,mask))
-
+        
         self.net = nn.Sequential(
             input_layer,
             encoder,
@@ -120,10 +140,14 @@ class cRFConvTasNet(nn.Module):
     def forward(self,x):
         B = x.shape[0]
         T = x.shape[-1]
+
         filter = self.net(x)
 
        # [B,N, C, filter, n_hfft, Time, 2(complex)]
-        filter = torch.reshape(filter,(B,self.N,self.c_out, (2*self.L_f+1),(2*self.L_t+1),self.F,T,2))
+        if self.output_type == "mask" : 
+            filter = torch.reshape(filter,(B,self.N,self.c_out, (2*self.L_f+1),(2*self.L_t+1),self.F,T,2))
+        else :
+            filter = torch.reshape(filter,(B,self.N,self.c_in, self.F,T,2))
 
         # Return in Complex type
         return torch.view_as_complex(filter)

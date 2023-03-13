@@ -1,0 +1,58 @@
+model :
+  type : 'ConvTasNet'
+  n_fft : 512
+  d_feature : 256
+  l_filter_f : 1  # 0 : cRM, > 0 : cRF
+  l_filter_t : 1  # 0 : cRM, > 0 : cRF
+  activation : 'Softplus' # Sigmoid, Softplus
+  n_target : 4
+  TCN_activation : "None" # None, Tanh, Sigmoid, PReLU, Softplus
+  phase : "cossinIPD"
+  mono : false
+  LPS : false
+  phase_full : true
+  only_azim : false
+  ADPIT : true
+  azim_shaking : 20
+---
+train:
+  epoch: 50
+  batch_size: 32
+  num_workers: 32
+  optimizer: 'adam'
+  adam: 0.001
+  adabound:
+    initial: 0.001
+    final: 0.05
+  summary_interval: 10
+  validation_interval: 100
+  checkpoint_interval: 1000
+---
+loss:
+  type: 'wSDRLoss' # SISDR
+  cross : false
+  wSDRLoss : 
+    alpha : 0.1
+---
+scheduler: # Plateau, oneCycle, None
+  type: 'Plateau'
+  oneCycle:
+    max_lr: 0.0001
+  Plateau:
+    mode: 'min'
+    patience: 2
+    factor: 0.5
+    min_lr: 0.000005
+---
+data:
+  root_train : '/home/data2/kbh/LGE/v9_AIO_train_big'
+  root_test  : '/home/data2/kbh/LGE/v9_AIO_test'
+  preemphasis : true
+  preemphasis_coef : 0.97
+  preemphasis_order : 3
+  n_frame : 125
+  n_channel : 4
+---
+  log:
+    root : '/home/nas/user/kbh/DOA-Audio-Separation/'
+    sample : ''

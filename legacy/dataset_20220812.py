@@ -1,3 +1,7 @@
+"""
+    legacy ~2022-08-12
+"""
+
 import os
 from glob import glob
 import torch
@@ -41,7 +45,6 @@ def get_n_feature(
 """
     audio : [n_sample,n_channel]
 """
-
 def deemphasis(audio,preemphasis_coef=0.97,device='cuda:0'):
     if torch.is_tensor(audio) :
         de = torch.zeros(audio.shape).to(device)
@@ -133,80 +136,69 @@ def preprocess(
 
     return input,stft,dup
 
-def gen_DOA_SV(
-    n_fft=512,
-    n_direction=359,
-    n_channel = 4,
-    sound_speed = 340.3,
-    sr=16000,
-    dist = 100.0
-    ):
-    n_hfft = int(n_fft/2+1)
-
-    ## Sensor map
-    map_sensor = np.zeros((4,3))
-    map_sensor[0,:]=[-0.04,-0.04,0.0]
-    map_sensor[1,:]=[-0.04,0.04,0.0]
-    map_sensor[2,:]=[0.04,-0.04,0.0]
-    map_sensor[3,:]=[0.04,0.04,0.0]
-
-    list_azim = np.zeros(n_direction)
-    for i in range(n_direction):
-        list_azim[i] = -180+i
-
-    map_source = np.zeros((n_direction,3))
-    for i in range(n_direction):
-        map_source[i,:] = [ dist*np.cos(np.deg2rad(90-list_azim[i])),dist*np.sin(np.deg2rad(90-list_azim[i])),0 ]    
-    #print(map_source)
-
-    # Calculate TDOA vector
-    TDOA = np.zeros((n_direction, n_channel))
-    for i in range(n_direction):
-        for j in range(n_channel):
-            pdist = np.linalg.norm(map_sensor[j,:] - map_source[i])
-            TDOA[i,j] = pdist/sound_speed
-
-    # Estimate RIR
-    h = np.zeros((n_direction, n_channel, n_hfft),np.cfloat)
-    for i in range(n_direction) :
-        for j in range(n_channel) :
-            for k in range(n_hfft) :
-                h[i,j,k] = np.exp(-1j*2*np.pi*k*(TDOA[i,j]-TDOA[i,j])*sr/n_fft)
-    return torch.from_numpy(h)
-
 class DatasetDOA(torch.utils.data.Dataset):
     def __init__(self,path,
     load_preprocessed=False,
     n_target = 4, 
-    ADPIT=True,
-    LPS=False,
-    azim_shaking=0,
+    IPD="cosIPD",
+    flat=True,
+    preemphasis=False,
     preemphasis_coef=0.97,
-    preemphasis_order=3
+    preemphasis_order=3,
+    ADPIT=True,
+    mono=False,
+    LPS=False,
+    full_phase=True,
+    only_azim=True,
+    # azimuth -> -0.5*azim_shaking ~ +0.5*azim_shaking
+    azim_shaking=0
     ):
 
-        self.list_data = glob(os.path.join(path+"_pre","spec","*.pt"))
-        self.path = path
-
+        self.load_preprocessed = load_preprocessed
+        if load_preprocessed : 
+            self.list_data = glob(os.path.join(path+"_pre","*.pt"))
+        else : 
+            self.list_data = glob(os.path.join(path,"*.wav"))
+            # filtering target audio
+            self.list_data = list(filter(lambda k: not '_' in k.split('/')[-1], self.list_data))
 
         self.n_target = n_target
+        self.flat = flat
 
+        if IPD == "IPD" : 
+            self.phase = feature.InterPhaseDifference
+        elif IPD == "cosIPD" :
+            self.phase = feature.cosIPD
+        elif IPD == "sinIPD" :
+            self.phase = feature.sinIPD
+        elif IPD == "NIPD" : 
+            self.phase = feautre.NormalizedIPD
+        elif IPD == "cossinIPD" : 
+            self.phase = feature.cossinIPD
+        else : 
+            raise Exception("Unimplemented phase method : {}".format(IPD))
+
+        self.preemphasis = preemphasis
         self.preemphasis_coef = preemphasis_coef
         self.preemphasis_order = preemphasis_order
 
         self.ADPIT = ADPIT
+        self.mono = mono
         self.LPS = LPS
+        self.full_phase = full_phase
+        self.only_azim=only_azim
         self.azim_shaking=azim_shaking
 
-        self.SV = gen_DOA_SV()
-
+        if preemphasis_order != 3 :
+            raise Exception("ERROR::dataset::preemphasis order {} is not implemented".format(preemphasis_order))
+        
     def __getitem__(self,idx):
         tmp_split = self.list_data[idx].split("/")
         name_data = tmp_split[-1]
         id_data = name_data.split(".")[0]
 
         dir_data = "/".join(tmp_split[:-1])
-        path_json = self.path+"/"+id_data+".json"
+        path_json = dir_data+"/"+id_data+".json"
 
         f_json = open(path_json)
         json_data = json.load(f_json)
@@ -216,64 +208,39 @@ class DatasetDOA(torch.utils.data.Dataset):
         pos_mic = torch.tensor(json_data["pos_mic"])
         azimuth = torch.tensor(json_data["azimuth"])
 
-        azimuth += (torch.rand(azimuth.shape)-0.5)*self.azim_shaking
+        if self.azim_shaking != 0 :
+            azimuth += (torch.rand(azimuth.shape)-0.5)*self.azim_shaking
 
         elevation = torch.tensor(json_data["elevation"])
+
         T = elevation.shape[1]
-
-        ## Loading input features
-        if self.LPS : 
-            LPS= torch.load(os.path.join(self.path+"_pre","LPS",name_data))
-        else :
-            LPS = torch.load(os.path.join(self.path+"_pre","mag",name_data))
-
-        IPD = torch.load(os.path.join(self.path+"_pre","cossin_IPD",name_data))
-
-
-
-        ## Loading raw data for criterion
-        spec = torch.load(self.list_data[idx])
-        spec = spec[:,:,:T,:]
-
-        # to complex
-        stft = spec[:,:,:,0] * spec[:,:,:,1]*1j
-
-        # AngleFeature
-        angle = torch.zeros((self.n_target,T,2))
-        angle[:n_src,:,:] =  torch.stack((azimuth,elevation),-1)
-        AF = feature.AngleFeature(stft,angle,pos_mic)
-        if not self.ADPIT : 
-            AF[n_src:,:,:] = 0 
-
-        LPS = torch.flatten(LPS[:,:,:T],end_dim=1)
-        IPD = torch.flatten(IPD[:,:,:T],end_dim=1)
-        AF  = torch.flatten(AF,end_dim=1)
-
-        input = torch.cat((LPS,IPD,AF),dim=0)
 
         # Temporal treatment for 'Audio buffer is not finite everywhere' error
         try : 
-            raw,_ = librosa.load(os.path.join(self.path,id_data+".wav"),sr=16000,mono=False)        
+            raw,_ = librosa.load(self.list_data[idx],sr=16000,mono=False)        
             # raw [n_channel, n_sample]
-            t_raw = np.zeros(raw.shape)
-            #for i_sample in range(3,raw.shape[1]) :
-            #        t_raw[:,i_sample] = raw[:,i_sample] - self.preemphasis_coef*raw[:,i_sample-1] + self.preemphasis_coef * raw[:,i_sample-1] - self.preemphasis_coef * raw[:,i_sample-2]
-            #raw = t_raw
+            if self.preemphasis : 
+                t_raw = np.zeros(raw.shape)
+                for i_sample in range(3,raw.shape[1]) :
+                        t_raw[:,i_sample] = raw[:,i_sample] - self.preemphasis_coef*raw[:,i_sample-1] + self.preemphasis_coef * raw[:,i_sample-1] - self.preemphasis_coef * raw[:,i_sample-2]
+                raw = t_raw
         except librosa.ParameterError as e:
             return self.__getitem__(idx+1)
 
         raw = torch.from_numpy(raw)
+
         ## load target routine
         
         ## target [N, C, T]
         target = torch.zeros(self.n_target, raw.shape[0] , raw.shape[1])
         for i  in range(n_src) : 
-            tmp,_ = librosa.load(self.path+"/"+id_data+"_"+str(i)+".wav",sr=16000,mono=False)
+            tmp,_ = librosa.load(dir_data+"/"+id_data+"_"+str(i)+".wav",sr=16000,mono=False)
 
-            t_tmp = np.zeros(tmp.shape)
-            #for i_sample in range(3,tmp.shape[1]) :
-            #        t_tmp[:,i_sample] = tmp[:,i_sample] - self.preemphasis_coef*tmp[:,i_sample-1] + self.preemphasis_coef * tmp[:,i_sample-1] - self.preemphasis_coef * tmp[:,i_sample-2]
-            #tmp = t_tmp
+            if self.preemphasis : 
+                t_tmp = np.zeros(tmp.shape)
+                for i_sample in range(3,tmp.shape[1]) :
+                        t_tmp[:,i_sample] = tmp[:,i_sample] - self.preemphasis_coef*tmp[:,i_sample-1] + self.preemphasis_coef * tmp[:,i_sample-1] - self.preemphasis_coef * tmp[:,i_sample-2]
+                tmp = t_tmp
 
             target[i,:,:] = torch.from_numpy(tmp)
 
@@ -284,7 +251,8 @@ class DatasetDOA(torch.utils.data.Dataset):
             else :
                 target[n_src:self.n_target,:,:] = 0
 
-        data = {"feature":input.float(),"spec":stft,"target":target.float(),"raw":raw[:,:].float(),"n_src":n_src}
+
+        data = {"flat":input.float(),"spec":stft.cfloat(),"target":target.float(),"path_raw":self.list_data[idx],"raw":raw[:,:].float(),"n_src":n_src}
 
         return data
 
@@ -359,7 +327,7 @@ if __name__ == "__main__":
             torch.save(lps.float(),path_lps)
 
         if extract_ipd :
-            ipd = feature.cossinIPD(stft[:,:,:],True)
+            ipd = feature.cossinIPD(stft[:,:,:])
             path_ipd = os.path.join(dir_out,"cossin_IPD",id+".pt")
             torch.save(ipd.float(),path_ipd)
 
@@ -375,7 +343,7 @@ if __name__ == "__main__":
     os.makedirs(os.path.join(dir_out,"cossin_IPD"),exist_ok=True)
     os.makedirs(os.path.join(dir_out,"spec"),exist_ok=True)
 
-    cpu_num = int(cpu_count()/4)
+    cpu_num = cpu_count()
 
     extract_mag = True
     extract_LPS = True

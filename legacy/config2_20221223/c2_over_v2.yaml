@@ -1,0 +1,13 @@
+model :
+  type : 'ResUNet'
+---
+loss:
+  type: 'wSDRLoss' 
+---
+train:
+  epoch: 30
+  batch_size: 16
+---
+data:
+  root_train : '/home/data2/kbh/LGE/v9_AIO_test'
+  root_test  : '/home/data2/kbh/LGE/v9_AIO_test'

@@ -1,0 +1,21 @@
+model :
+  azim_shaking : 10
+  Softplus:
+    threshold : 15
+  ADPIT : true
+  phase_full : true
+  c_out : 4
+  separator : "SepFormer"
+---
+train:
+  batch_size: 12
+  num_workers: 12
+  adam: 0.001
+---
+data:
+  root_train  : '/home/kbh/v10_AIO_test'
+  root_test  :  '/home/kbh/v10_AIO_test'
+  #root_train  : '/home/data2/kbh/LGE/v9_AIO_test'
+  #root_test  :  '/home/data2/kbh/LGE/v9_AIO_test'
+  n_frame : 500
+  #n_frame : 125

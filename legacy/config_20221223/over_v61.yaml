@@ -1,0 +1,30 @@
+model :
+  l_filter_f : 0  # 0 : cRM, > 0 : cRF
+  l_filter_t : 0  # 0 : cRM, > 0 : cRF
+  activation : 'Softplus' # Sigmoid, Softplus
+  n_target : 4
+  azim_shaking : 20
+  Softplus:
+    threshold : 15 #default 20
+  c_out : 1
+  output_type : "filter"
+---
+train:
+  epoch: 50
+  batch_size: 16
+  num_workers: 
+---
+loss:
+  type: 'wSDRLoss' # SISDR
+  wSDRLoss : 
+    alpha : 0.1
+---
+data:
+  root_train  : '/home/data2/kbh/LGE/v9_AIO_test'
+  root_test  : '/home/data2/kbh/LGE/v9_AIO_test'
+  preemphasis : false
+  preemphasis_coef : 0.97
+  preemphasis_order : 3
+  n_frame : 125
+  n_channel : 4
+  preprocessed : true

@@ -14,17 +14,24 @@ from ptUtils.hparams import HParam
 from ptUtils.writer import MyWriter
 from ptUtils.Loss import mSDRLoss,wSDRLoss,SISDRLoss,iSDRLoss,wMSELoss
 from ptUtils.metric import SIR,PESQ
+from ptUtils.scheduler import CosineAnnealingWarmUpRestarts
+
+
+from datetime import datetime
+
 
 def get_wav_loss(hp,target,output_raw,n_src,criterion,device,raw=None): 
-    C = hp.data.n_channel
-
     loss = torch.tensor(0.0,requires_grad=True).to(device)
-    
+
     if hp.model.ADPIT : 
         for l in range(N) : 
             for c in range(c_out) : 
                 if hp.loss.type == "wSDRLoss":
-                    loss +=  Loss(output_raw[:,l,c,:],raw[:,c,:],target[:,l,c,:],alpha = hp.loss.wSDRLoss.alpha).to(device)
+                    loss +=  Loss(
+                        output_raw[:,l,c,:],
+                        raw[:,c,:],
+                        target[:,l,c,:],
+                        alpha = hp.loss.wSDRLoss.alpha).to(device)
                 else : 
                     loss += Loss(output_raw[:,l,c,:],target[:,l,c,:]).to(device)
     else : 
@@ -32,7 +39,10 @@ def get_wav_loss(hp,target,output_raw,n_src,criterion,device,raw=None):
             N_temp = n_src[b]
             for c in range(c_out) : 
                 if hp.loss.type == "wSDRLoss":
-                    loss +=  Loss(output_raw[b,:N_temp,c,:],raw[b,c,:],target[b,:N_temp,c,:],alpha = hp.loss.wSDRLoss.alpha).to(device)
+                    loss +=  Loss(
+                        output_raw[b,:N_temp,c,:],
+                        raw[b,c,:],
+                        target[b,:N_temp,c,:],alpha = hp.loss.wSDRLoss.alpha).to(device)
                 else : 
                     loss += Loss(output_raw[b,:N_temp,c,:],target[b,:N_temp,c,:]).to(device)
 
@@ -45,7 +55,7 @@ def get_spectral_loss(hp,target_spec,output_spec,n_src,criterion,device):
 
     if hp.model.ADPIT : 
         for l in range(N) : 
-            for c in range(C) : 
+            for c in range(c_out) : 
                 if hp.loss.type == "wMSELoss" : 
                     loss += Loss(output_spec[:,l,c,:],target_spec[:,l,c,:],alpha=hp.loss.wMSELoss.alpha).to(device)
                 else :
@@ -53,7 +63,7 @@ def get_spectral_loss(hp,target_spec,output_spec,n_src,criterion,device):
     else : 
         for b in range(target.shape[0]) : 
             N_temp = n_src[b]
-            for c in range(C) : 
+            for c in range(c_out) : 
                 if hp.loss.type == "wMSELoss" : 
                     loss += Loss(output_spec[b,:N_temp,c,:],target_spec[b,:N_temp,c,:],alpha=hp.loss.wMSELoss.alpha).to(device)
                 else :
@@ -78,17 +88,25 @@ def run(model,feature,input,target,raw,n_src, ret_output=False) :
     input_alt = torch.nn.functional.pad(input,pad=(L_t,L_t,L_f,L_f) ,mode="constant", value=0)
     output = torch.zeros((input.shape[0],N,c_out,F,T),dtype=torch.cfloat).to(device)
 
-    ## TODO : there should be fancier way to do this.
-    for t in range(2*L_t+1) : 
-        for f in range(2*L_f+1):
-            for n in range(N) : 
-                output[:,n,:c_out,:,:] += torch.mul(
-                    input_alt[: , :c_out, f:F+f , t:T+t ],
-                    filter[:,n,:c_out,f,t,:,:]
-                    )
+    if hp.model.output_type == "mask" :
+        ## TODO : there should be fancier way to do this.
+        for t in range(2*L_t+1) : 
+            for f in range(2*L_f+1):
+                for n in range(N) :  # per target
+                    output[:,n,:c_out,:,:] += torch.mul(
+                        input_alt[: , :c_out, f:F+f , t:T+t ],
+                        filter[:,n,:c_out,f,t,:,:]
+                        )
+    elif hp.model.output_type == "filter":
+        # B,N,C,F,T <matmul> B,N,C,F,T -> B,N,1,F,T 
+        pass
+
+    else :
+        raise Exception("ERROR::unknown model output_type : {}".format(hp.model.output_type))
     
     # iSTFT
     output_raw = torch.zeros((input.shape[0],N,c_out,target.shape[-1])).to(device)
+
 
     # torch STFT/iSTFT
     for j in range(N) :
@@ -154,10 +172,7 @@ if __name__ == '__main__':
     F = int(hp.model.n_fft/2 + 1)
     T = hp.data.n_frame
     n_fft = hp.model.n_fft
-    c_out=1
-
-
-
+    c_out=hp.model.c_out
 
     ## load
     modelsave_path = hp.log.root +'/'+'chkpt' + '/' + version
@@ -168,10 +183,9 @@ if __name__ == '__main__':
 
     writer = MyWriter(hp, log_dir)
 
-    n_feature = get_n_feature(hp.data.n_channel,hp.model.n_target, 
-    hp.model.mono, 
-    hp.model.phase,
-    hp.model.phase_full
+    n_feature = get_n_feature(
+        hp.data.n_channel,
+        hp.model.n_target, 
     )
 
 ##  Model
@@ -184,6 +198,7 @@ if __name__ == '__main__':
             f_ch=hp.model.d_feature,
             n_fft=hp.model.n_fft,
             mask=hp.model.activation,
+            separator =  hp.model.separator,
             n_target=n_target,
             hp=hp
         ).to(device)
@@ -221,17 +236,21 @@ if __name__ == '__main__':
     #dataset_train = DatasetDOA(hp.data.root+"/train")
     #dataset_test  = DatasetDOA(hp.data.root+"/test")
     dataset_train = DatasetDOA(hp.data.root_train,
+    load_preprocessed = hp.data.preprocessed,
     n_target=n_target,
     LPS = hp.model.LPS,
     ADPIT=hp.model.ADPIT,
+    preemphasis = hp.data.preemphasis,
     preemphasis_coef =hp.data.preemphasis_coef ,
     preemphasis_order =hp.data.preemphasis_order,
     azim_shaking=hp.model.azim_shaking
     )
     dataset_test  = DatasetDOA(hp.data.root_test,
+    load_preprocessed = hp.data.preprocessed,
     n_target=n_target,
     LPS = hp.model.LPS,
     ADPIT=hp.model.ADPIT,
+    preemphasis = hp.data.preemphasis,
     preemphasis_coef =hp.data.preemphasis_coef ,
     preemphasis_order =hp.data.preemphasis_order,
     azim_shaking=hp.model.azim_shaking
@@ -266,12 +285,17 @@ if __name__ == '__main__':
             factor=hp.scheduler.Plateau.factor,
             patience=hp.scheduler.Plateau.patience,
             min_lr=hp.scheduler.Plateau.min_lr)
+        bool_scheduler_req_loss = True
     elif hp.scheduler.type == 'oneCycle':
         scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer,
                 max_lr = hp.scheduler.oneCycle.max_lr,
                 epochs=hp.train.epoch,
                 steps_per_epoch = len(train_loader)
         )
+        bool_scheduler_req_loss = True
+    elif hp.scheduler.type == "CosineAnnealingWarmUpRestarts" :
+        scheduler = CosineAnnealingWarmUpRestarts(optimizer, T_0=100, T_mult=1, eta_max=0.1,  T_up=10, gamma=0.5)
+        bool_scheduler_req_loss = False
     else :
         raise Exception("Unsupported sceduler type")
 
@@ -280,7 +304,6 @@ if __name__ == '__main__':
     shift = int(hp.model.n_fft/4)
 
     step = args.step
-
     print("INFO::Learning")
     for epoch in range(num_epochs) :
         ### TRAIN ####
@@ -301,6 +324,13 @@ if __name__ == '__main__':
 
             loss = run(model,feature,input,target,raw,n_src,ret_output=False)
 
+            """
+            https://pytorch.org/tutorials/recipes/recipes/tuning_guide.html 
+
+            Use parameter.grad = None instead of model.zero_grad() or optimizer.zero_grad()
+            ... 
+            Alternatively, starting from PyTorch 1.7, call model or optimizer.zero_grad(set_to_none=True).
+            """
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -353,10 +383,10 @@ if __name__ == '__main__':
                 test_loss +=loss.item()
 
             test_loss = test_loss/len(test_loader)
-            if hp.scheduler.type == 'Plateau':
+            if bool_scheduler_req_loss : 
                 scheduler.step(test_loss)
             else :
-                scheduler.step(test_loss)
+                scheduler.step(epoch)
 
             ## Log 
             np.random.seed(int.from_bytes(os.urandom(4), byteorder='little'))

@@ -1,0 +1,45 @@
+model :
+  n_fft : 512
+  d_feature : 256
+  l_filter : 0  # 0 : cRM, > 0 : cRF
+  activation : 'Sigmoid' # Sigmoid, Softplus
+  n_target : 4
+---
+train:
+  epoch: 50
+  batch_size: 128
+  num_workers: 32
+  optimizer: 'adam'
+  adam: 0.001
+  adabound:
+    initial: 0.001
+    final: 0.05
+  summary_interval: 10
+  validation_interval: 100
+  checkpoint_interval: 1000
+---
+loss:
+  type: 'SISDRLoss' # SISDR
+  cross : false
+  wSDRLoss : 
+    alpha : 0.5
+---
+scheduler: # Plateau, oneCycle, None
+  type: 'Plateau'
+  oneCycle:
+    max_lr: 0.0001
+  Plateau:
+    mode: 'min'
+    patience: 2
+    factor: 0.5
+    min_lr: 0.000005
+---
+data:
+  root_train : '/home/data2/kbh/LGE/n4_1sec_mov'
+  root_test  : '/home/data2/kbh/LGE/n4_1sec_mov'
+  n_frame : 125
+  n_channel : 4
+---
+  log:
+    root : '/home/nas/user/kbh/DOA-Audio-Separation/'
+    sample : ''

@@ -86,7 +86,7 @@ mic_pos : [C,3]
 + return
 AF : [N,C,F,T]
 """
-def AngleFeature(stft,angle,mic_pos,fs=16000,complex=False,dist=100.0):
+def AngleFeature(stft,angle,mic_pos,fs=16000,complex=False,dist=1.0):
     # F : n_hfft
     C,F,T = stft.shape 
     N,_,_ = angle.shape
@@ -96,18 +96,18 @@ def AngleFeature(stft,angle,mic_pos,fs=16000,complex=False,dist=100.0):
     n_fft = 2*F-2
     #n_fft = 2*F+1
 
+
     ## location of sources
     loc_src = torch.zeros(N,T,3)
     loc_src[:,:,0] = dist*torch.cos((90-angle[:,:,0])/180*pi)*torch.sin((90-angle[:,:,1])/180*pi)
     loc_src[:,:,1] = dist*torch.sin((90-angle[:,:,0])/180*pi)*torch.sin((90-angle[:,:,1])/180*pi)
     loc_src[:,:,2] = dist*torch.cos((90-angle[:,:,1])/180*pi)
 
-
     # TDOA
     TDOA = torch.zeros(N,C,T)
 
     for i in range(C) : 
-            TDOA[:,i,:] = torch.norm(mic_pos[i,:] - loc_src[:,:,:] )
+        TDOA[:,i,:] = torch.norm(mic_pos[i,:] - loc_src[:,:,:])
 
     ## Steering vector
     SV = torch.zeros(N,C,F,T, dtype=torch.cfloat)
@@ -121,7 +121,6 @@ def AngleFeature(stft,angle,mic_pos,fs=16000,complex=False,dist=100.0):
                 SV[i_N,:,i,i_T] = SV[i_N,:,i,i_T]/torch.sqrt((C)/torch.norm(SV[i_N,:,i,i_T]))
         #SV[:,:,i,:] = torch.exp(1j*2*pi*i/n_fft*TDOA*fs/ss)
     # norm
-
 
     """
     K. Tan, Y. Xu, S. Zhang, M. Yu and D. Yu, "Audio-Visual Speech Separation and Dereverberation With a Two-Stage Multimodal Network," in IEEE Journal of Selected Topics in Signal Processing, vol. 14, no. 3, pp. 542-553, March 2020, doi: 10.1109/JSTSP.2020.2987209.
