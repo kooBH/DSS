@@ -3,8 +3,6 @@ import torch.nn as nn
 
 import pdb
 
-from .modules import *
-
 """
 Direction Attractor Net
 
@@ -13,10 +11,172 @@ Y. Nakagome, M. Togami, T. Ogawa and T. Kobayashi, "Deep Speech Extraction with 
 
 NOTE : Because there are too many untold components, major parts of this code are improvisations. 
 """
+
+class permuteTF(nn.Module):
+    def __init__(self):
+        super(permuteTF, self).__init__()
+
+    def forward(self,x):
+        if len(x.shape) == 3 :
+            x = torch.permute(x,(0,2,1))
+        elif len(x.shape) == 4 :
+            x = torch.permute(x,(0,1,3,2))
+        return x
+
+class encoder(nn.Module):
+    def __init__(self,
+                 n_in = 257,
+                 n_dim=1024,
+                 n_hidden_layer=3,
+                 n_out = 40,
+                 type_activation=None,
+                 type_normalization=None,
+                 dropout = 0.0
+                 ):
+        super(encoder, self).__init__()
+        n_dim = 1024
+
+        if type_activation == "PReLU" : 
+            activation = nn.PReLU
+        elif type_activation == "ReLU" : 
+            activation = nn.ReLU
+        else :
+            activation = nn.Identity
+
+        if type_normalization == "BatchNorm":
+            normalization = nn.BatchNorm1d
+        else  :
+            normalization = nn.Identity
+
+        self.encoder = []
+        self.acitvation = []
+        self.normalization = []
+
+        self.layers = []
+        module = nn.Sequential(
+            nn.Linear(n_in,n_dim),
+            activation(),
+            permuteTF(),
+            normalization(n_dim),
+            permuteTF()
+        )
+        self.layers.append(module)
+
+        for i in range(n_hidden_layer):
+            module = nn.Sequential(
+                nn.Linear(n_dim,n_dim),
+                activation(),
+                permuteTF(),
+                normalization(n_dim),
+                permuteTF()
+            )
+            self.layers.append(module)
+
+        module = nn.Sequential(
+                nn.Linear(n_dim,n_out),
+                activation(),
+                permuteTF(),
+                normalization(n_out),
+                permuteTF()
+            )
+        self.layers.append(module)
+
+        self.layers = nn.ModuleList(self.layers)
+        self.DR = nn.Dropout(dropout)
+
+    def forward(self,x):
+        for i in range(len(self.layers)) :
+            x = self.layers[i](x)
+            x = self.DR(x)
+        return x
+    
+class estimator(nn.Module):
+    def __init__(self,
+                 n_in,
+                 n_out,
+                 type_activation="Sigmoid",
+                 type_normalization=None
+                 ) :
+        super(estimator,self).__init__()
+
+        if type_activation == "PReLU" : 
+            activation = nn.PReLU
+        elif type_activation == "ReLU" : 
+            activation = nn.ReLU
+        elif type_activation == "Sigmoid" : 
+            activation = nn.Sigmoid
+        else :
+            activation = nn.Identity
+
+        if type_normalization == "BatchNorm":
+            normalization = nn.BatchNorm1d
+        else  :
+            normalization = nn.Identity
+
+        self.layer = nn.Sequential(
+            nn.Linear(n_in,n_out),
+            activation(),
+            normalization(n_out)
+        )
+    
+    def forward(self,x):
+        return self.layer(x)
+
+class RNN_block(nn.Module) : 
+    def __init__(self,dim_in,dim_out,
+                 style="GRU"
+                 ):
+        super(RNN_block, self).__init__()
+
+        if style == "GRU" : 
+            self.layer = nn.GRU(dim_in,dim_out,batch_first=True)
+        elif style == "LSTM" : 
+            self.layer = nn.LSTM(dim_in,dim_out,batch_first=True)
+        else : 
+            self.layer = nn.RNN(dim_in,dim_out,batch_first=True)
+
+        self.permuteTF = permuteTF()
+        self.norm = nn.BatchNorm1d(dim_out)
+        self.permuteFT = permuteTF()
+        self.activation = nn.PReLU()
+
+    def forward(self,x):
+        x,h = self.layer(x)
+        x = self.permuteTF(x)
+        x = self.norm(x)
+        x = self.permuteFT(x)
+        x = self.activation(x)
+        return x
+    
+class RNN(nn.Module) : 
+    def __init__(self,dim_in,dim_out,
+                 n_hidden=1024,
+                 n_rnn_layer=2,
+                 style="GRU"
+                 ):
+        super(RNN, self).__init__()
+
+        if n_rnn_layer < 2 :
+            Exception("n_rnn_layer must be larger than 2")
+
+        self.layers = []
+        self.layers.append(RNN_block(dim_in,n_hidden,style=style))
+        for i in range(n_rnn_layer-2) : 
+            self.layers.append(RNN_block(n_hidden,n_hidden,style=style))
+        self.layers.append(RNN_block(n_hidden,dim_out,style=style))
+        self.layers = nn.ModuleList(self.layers)
+
+        # TODO : TGRU, FGRU
+
+    def forward(self,x):
+        for i in range(len(self.layers)) :
+            x = self.layers[i](x)
+
+        return x
+
 class DirectionAttractor(nn.Module) : 
     def __init__(self,
                  n_channel=4,
-                 n_spectral = 4,
                  n_angle=2,
                  n_fft=512,
                  n_dim=1024,
@@ -41,7 +201,7 @@ class DirectionAttractor(nn.Module) :
         self.C = n_channel
 
         self.D = encoder(
-                n_in = n_spectral*n_hfft,
+                n_in = n_channel*4*n_hfft,
                 n_dim=n_dim,
                 n_hidden_layer=n_hidden_layer,
                 n_out = n_latent,
@@ -49,8 +209,6 @@ class DirectionAttractor(nn.Module) :
                 type_normalization=type_normalization,
                 dropout=dropout
         )  
-
-        """
         self.Z_s = encoder(
                 n_in = n_angle,
                 n_dim=n_dim,
@@ -60,7 +218,6 @@ class DirectionAttractor(nn.Module) :
                 type_normalization=type_normalization,
                 dropout=dropout
         )
-
         self.Z_n = encoder(
                 n_in = n_angle,
                 n_dim=n_dim,
@@ -69,17 +226,6 @@ class DirectionAttractor(nn.Module) :
                 type_activation=type_activation,
                 type_normalization=type_normalization,
                 dropout=dropout
-        )
-        """
-
-        self.Z_s = nn.Sequential(
-            nn.Linear(n_angle,n_latent),
-            nn.Sigmoid()
-        )
-
-        self.Z_n = nn.Sequential(
-            nn.Linear(n_angle,n_latent),
-            nn.Sigmoid()
         )
 
         self.RNN_s = RNN(n_latent,n_latent,n_rnn_layer=n_rnn_layer)
@@ -98,6 +244,8 @@ class DirectionAttractor(nn.Module) :
         T = spectral_feature.shape[1]
         e = self.D(spectral_feature)
 
+
+        angle = torch.unsqueeze(angle,1)
         a_s = self.Z_s(angle)
         a_n = self.Z_n(angle)
 
@@ -113,9 +261,6 @@ class DirectionAttractor(nn.Module) :
 
         e_s = self.RNN_s(e_s)
         e_n = self.RNN_n(e_n)
-
-        #e_s = self.RNN_s(e)
-        #e_n = self.RNN_n(e)
 
         #print("e_s {} | e_n {}".format(e_s.shape,e_n.shape))
 
@@ -139,6 +284,7 @@ class DirectionAttractor(nn.Module) :
         M_s = M_s[...,0] + 1j*M_s[...,1]
         M_n = M_n[...,0] + 1j*M_n[...,1]
         """
+
         return M_s,v_s,M_n,v_n
 
 class DirectionAttractorNet(nn.Module):
@@ -151,7 +297,6 @@ class DirectionAttractorNet(nn.Module):
                  type_normalization=None,
                  type_activation_out=None,
                  dropout = 0.0,
-                 spectral_feature = ["x","SV"],
                  angle_feature = "theta"
                  ):
         super(DirectionAttractorNet, self).__init__()
@@ -165,14 +310,6 @@ class DirectionAttractorNet(nn.Module):
         self.window = torch.hann_window(self.n_fft)
 
         self.dist = dist
-
-        channel_feature = 0
-        if "X" in spectral_feature :
-            channel_feature += n_channel*2
-        if "SV" in spectral_feature :
-            channel_feature += n_channel*2
-
-        self.spectral_feature = spectral_feature
         
         if method_out == "mask_mag" :
             self.f_out = self.masking
@@ -190,8 +327,10 @@ class DirectionAttractorNet(nn.Module):
             n_angle = 2
         elif angle_feature == "absSV" : 
             n_angle = self.n_hfft*n_channel
+            raise Exception("{} is not implemented".format(angle_feature))
         elif angle_feature == "SV" : 
             n_angle = self.n_hfft*2*n_channel
+            raise Exception("{} is not implemented".format(angle_feature))
         else :
             raise Exception("{} is unknown type of anlge feature".format(angle_feature))
         
@@ -202,7 +341,6 @@ class DirectionAttractorNet(nn.Module):
             type_normalization=type_normalization,
             type_activation_out=type_activation_out,
             dropout=dropout,
-            n_spectral = channel_feature,
             n_angle = n_angle,
             out_cplx = self.out_cplx
             )
@@ -312,7 +450,6 @@ class DirectionAttractorNet(nn.Module):
         #w = (M_s*v_s)/(M_n*v_n+1e-6)
 
         w = M_s*v_s - M_n*v_n
-        #w = M_s - M_n
         #w = (M_s*v_s)
 
         w = w.permute(0,2,1,3)
@@ -335,40 +472,24 @@ class DirectionAttractorNet(nn.Module):
         a = self.steering_vector(angle,mic_pos)
         a = a.unsqueeze(-1).expand(-1, -1, -1, T)
 
-        """
-            Spectral Features
-        """
-        spec_feat = None
-        if "X" in self.spectral_feature : 
-            if spec_feat is None : 
-                spec_feat = torch.cat([X.real,X.imag],dim=1)
-            else : 
-                spec_feat = torch.cat([spec_feat,X.real,X.imag],dim=1)
+        spectral_feature = torch.cat([X.real,X.imag,a.real,a.imag],dim=1)
+        spectral_feature = spectral_feature.reshape(B,C*4*F,T)
 
-        if "SV" in self.spectral_feature : 
-            if spec_feat is None : 
-                spec_feat = torch.cat([a.real,a.imag],dim=1) 
-            else : 
-                spec_feat = torch.cat([spec_feat,a.real,a.imag],dim=1)
+ 
 
-        spec_feat = spec_feat.reshape(B,-1,T)
         # [B,C,F,T] -> [B,C,T,F]
-        spec_feat = spec_feat.permute(0,2,1)
-        #print("spec_feat : {}, angle {}".format(spec_feat.shape,angle.shape))
+        spectral_feature = spectral_feature.permute(0,2,1)
+        
+        #print("spectral_feature : {}, angle {}".format(spectral_feature.shape,angle.shape))
 
         if self.anlgle_feature == "theta" : 
             angle_feature = self.anlge_pre(angle)
-            angle_feature = torch.unsqueeze(angle_feature,1)
         elif self.anlgle_feature =="SV" :
             angle_feature = torch.cat((a.real,a.imag),dim=1)
-            angle_feature = torch.reshape(angle_feature,(B,F*C*2,T))
-            angle_feature = torch.permute(angle_feature,(0,2,1))
         elif self.anlgle_feature =="absSV" :
-            angle_feature = torch.abs(a)
-            angle_feature = torch.reshape(angle_feature,(B,F*C,T))
-            angle_feature = torch.permute(angle_feature,(0,2,1))
+            angle_feature = torch.abs(torch.cat((a.real,a.imag),dim=1))
 
-        M_s,v_s,M_n,v_n = self.DAN(spec_feat,angle_feature)
+        M_s,v_s,M_n,v_n = self.DAN(spectral_feature,angle_feature)
 
         Y = self.f_out(X,a,M_s,v_s,M_n,v_n)
 

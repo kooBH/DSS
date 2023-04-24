@@ -1,5 +1,6 @@
 torch==1.11
 torchaudio
+torchvision
 argparse
 librosa
 numpy
@@ -8,3 +9,5 @@ tensorboardX
 matplotlib
 tqdm
 pesq
+
+torch-complex

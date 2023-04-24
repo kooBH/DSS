@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from Conformer import Conformer
+#from Conformer import Conformer
 
 class DSS(nn.Module):
     def __init__(self, type_separtor, n_channel=5):
@@ -9,17 +9,6 @@ class DSS(nn.Module):
         
         self.n_fft = 512
         self.n_hfft = 257
-
-        if type_separtor == "Conformer" : 
-            self.separator = Conformer(
-              257,
-              num_spk=1,
-              input_ch = n_channel,
-              input_layer = "conv2d"
-            )
-            self.do_masking = True
-        else :
-            raise Exception("ERROR::Unknown separator : {}".format(type_separtor))
 
         ## For inference
         self.window = torch.hann_window(self.n_fft)

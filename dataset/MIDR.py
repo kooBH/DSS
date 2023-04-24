@@ -13,20 +13,29 @@ root_rir    = "/home/data2/kbh/MIDR___Multi-Channel_Impulse_Response_Database/"
 root_speech = "/home/nas/DB/CHiME4/data/audio/16kHz/isolated/tr05_org/"
 root_noise  = "/home/nas/DB/DEMAND/dataset/"
 
-root_output = "/home/data2/kbh/DSS/MIDR/v0"
+root_output = "/home/data2/kbh/DSS/MIDR/v3"
 
 ## PARAM
 SNR_max = 20
-SNR_min = 5
+"""
+v0 : 5
+"""
+SNR_min = 0
 
 SIR_max = 10
-SIR_min = 0
+"""
+v0 : 0
+"""
+SIR_min = -5
 
 scale_dB_max = 15
 scale_dB_min = -40
 
-len_data = 16000*5
+len_data = 48000*5
 ratio_test = 0.25
+
+n_train = 10000
+n_test = 1000
 
 ## list-up
 list_room_train = []
@@ -141,7 +150,7 @@ def mix(
         rir_speech = rir_speech[:,:4]
     else :
         rir_speech = rir_speech[:,4:]
-    speech,_ = rs.load(path_speech,sr=16000,mono=False)
+    speech,_ = rs.load(path_speech,sr=48000,mono=False)
 
     s = []
     for i in range(4) :
@@ -164,7 +173,7 @@ def mix(
         rir_interf = rir_interf[:,:4]
     else :
         rir_interf = rir_interf[:,4:]
-    interf,_ = rs.load(path_interf,sr=16000,mono=False)
+    interf,_ = rs.load(path_interf,sr=48000,mono=False)
 
     v = []
     for i in range(4) :
@@ -185,6 +194,7 @@ def mix(
     v *= snr_scalar
 
     ## noise
+    """
     noise = rs.load(path_noise,sr=16000)[0]
     # sample noise
     idx_clip = np.random.randint(0,noise.shape[0]-len_data)
@@ -218,9 +228,13 @@ def mix(
     noise_rms = (noise ** 2).mean() ** 0.5
     snr_scalar = noise_rms / (10 ** (SNR / 20)) / (noise_rms + 1e-13)
     d *= snr_scalar
+    """
 
     ## Mix
-    x = s + v + d
+    #x = s + v + d
+
+    # no noise
+    x = s + v
 
     # dB Management
     # resacle noisy RMS
@@ -233,6 +247,9 @@ def mix(
         noisy_scalar = np.max(np.abs(x)) / (0.99 - 1e-13)  # same as divide by 1
         x /= noisy_scalar
         clean /= noisy_scalar
+
+    x = rs.resample(x,48000,16000)
+    clean = rs.resample(clean,48000,16000)
 
     return x, clean
 
@@ -284,16 +301,15 @@ if __name__ == "__main__" :
     import warnings
     warnings.filterwarnings('ignore')
 
-    cpu_num = int(cpu_count()/2)
-
+    cpu_num = int(cpu_count()/4)
     for c1 in ["train","test"] :
         for c2 in ["clean","noisy","label"] :
             os.makedirs(os.path.join(root_output,c1,c2),exist_ok=True)
 
-    arr = list(range(3000))
+    arr = list(range(n_train))
     with Pool(cpu_num) as p:
         r = list(tqdm(p.imap(generate_train, arr), total=len(arr),ascii=True,desc='processing'))
 
-    arr = list(range(1000))
+    arr = list(range(n_test))
     with Pool(cpu_num) as p:
         r = list(tqdm(p.imap(generate_test, arr), total=len(arr),ascii=True,desc='processing'))

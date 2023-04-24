@@ -8,10 +8,12 @@ from tensorboardX import SummaryWriter
 
 from Datasets.DatasetDOA import DatasetDOA
 from Datasets.DatasetMIDR import DatasetMIDR
+from Datasets.DatasetUDSS import DatasetUDSS
 
 from ptUtils.hparams import HParam
 from ptUtils.writer import MyWriter
-from ptUtils.Loss import wSDRLoss
+from ptUtils.Loss import wSDRLoss,TrunetLoss
+from ptUtils.metric import run_metric
 
 from common import run,get_model
 
@@ -29,7 +31,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     hp = HParam(args.config,args.default)
-    print("NOTE::Loading configuration : "+args.config)
+    print("INFO::Loading configuration : "+args.config)
 
     device = args.device
     version = args.version_name
@@ -48,6 +50,7 @@ if __name__ == '__main__':
     os.makedirs(modelsave_path,exist_ok=True)
     os.makedirs(log_dir,exist_ok=True)
 
+    writer = MyWriter(log_dir)
 
     if hp.dataset== "DOA" : 
         train_dataset = DatasetDOA(hp,is_train = True)
@@ -55,9 +58,16 @@ if __name__ == '__main__':
     elif hp.dataset == "MIDR" :
         train_dataset = DatasetMIDR(hp,is_train = True)
         test_dataset= DatasetMIDR(hp,is_train = False)
+    elif hp.dataset == "UDSS" :
+        train_dataset = DatasetUDSS(hp,is_train = True)
+        test_dataset= DatasetUDSS(hp,is_train = False)
+    else :
+        raise Exception("ERROR::Unknown dataset : {}".format(hp.dataset))
 
     train_loader = torch.utils.data.DataLoader(dataset=train_dataset,batch_size=batch_size,shuffle=True,num_workers=num_workers)
     test_loader = torch.utils.data.DataLoader(dataset=test_dataset,batch_size=batch_size,shuffle=True,num_workers=num_workers)
+
+    print("INFO::Dataset Loaded")
 
     model = get_model(hp).to(device)
 
@@ -65,11 +75,15 @@ if __name__ == '__main__':
         print('NOTE::Loading pre-trained model : '+ args.chkpt)
         model.load_state_dict(torch.load(args.chkpt, map_location=device))
     if hp.loss.type == "MSELoss":
-        criterion = torch.nn.MSELoss
+        criterion = torch.nn.MSELoss()
     elif hp.loss.type == "wSDRLoss" : 
         criterion = wSDRLoss
+    elif hp.loss.type == "TrunetLoss" :
+        criterion = TrunetLoss()
     else :
         raise Exception("ERROR::Unsupported criterion : {}".format(hp.loss.type))
+
+    print("INFO::Model Loaded")
 
     optimizer = torch.optim.Adam(model.parameters(), lr=hp.train.adam)
 
@@ -84,7 +98,7 @@ if __name__ == '__main__':
                 max_lr = hp.scheduler.oneCycle.max_lr,
                 epochs=hp.train.epoch,
                 steps_per_epoch = len(train_loader)
-                )
+        )
     elif hp.scheduler.type == "CosineAnnealingLR" : 
        scheduler =  torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=hp.scheduler.CosineAnnealingLR.T_max, eta_min=hp.scheduler.CosineAnnealingLR.eta_min)
     else :
@@ -92,9 +106,8 @@ if __name__ == '__main__':
 
     step = args.step
 
+    print("INFO::Train starts")
     for epoch in range(num_epochs):
-        writer = MyWriter(log_dir)
-
         ### TRAIN ####
         model.train()
         train_loss=0
@@ -103,15 +116,16 @@ if __name__ == '__main__':
 
             loss = run(hp,device,batch_data,model,criterion)
             optimizer.zero_grad()
+
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 5)
             optimizer.step()
             train_loss += loss.item()
-           
-            print('TRAIN::{} : Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}'.format(version,epoch+1, num_epochs, i+1, len(train_loader), loss.item()))
 
             if step %  hp.train.summary_interval == 0:
+                print('TRAIN::{} : Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}'.format(version,epoch+1, num_epochs, i+1, len(train_loader), loss.item()))
                 writer.log_value(loss,step,'train loss : '+hp.loss.type)
-
+            
         train_loss = train_loss/len(train_loader)
         torch.save(model.state_dict(), str(modelsave_path)+'/lastmodel.pt')
             
@@ -119,17 +133,27 @@ if __name__ == '__main__':
         model.eval()
         with torch.no_grad():
             test_loss =0.
+            if hp.loss.type == "TrunetLoss" :
+                criterion.clear()
             for j, (batch_data) in enumerate(test_loader):
                 estim, loss = run(hp,device,batch_data,model,criterion,ret_output=True)
                 test_loss += loss.item()
 
-                print('TEST::{} :  Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}'.format(version, epoch+1, num_epochs, j+1, len(test_loader), loss.item()))
-                test_loss +=loss.item()
-
             test_loss = test_loss/len(test_loader)
+
+            print('TEST::{} :  Epoch [{}/{}], Step [{}/{}], Loss: {:.4f}'.format(version, epoch+1, num_epochs, j+1, len(test_loader), test_loss))
+
             scheduler.step(test_loss)
             
             writer.log_value(test_loss,step,'test loss : ' + hp.loss.type)
+
+            if hp.loss.type == "TrunetLoss" :
+                log_sdr = criterion.log_sdr/len(test_loader)
+                log_spc = criterion.log_spc/len(test_loader)
+                criterion.clear()
+
+                writer.log_value(log_sdr.item(),step,'sdr')
+                writer.log_value(log_spc.item(),step,'spc')
 
             log_estim = estim[0,:]
             log_clean = batch_data["clean"][0,:]
@@ -146,6 +170,25 @@ if __name__ == '__main__':
             if best_loss > test_loss:
                 torch.save(model.state_dict(), str(modelsave_path)+'/bestmodel.pt')
                 best_loss = test_loss
-            
-            
-        writer.close()
+
+            pesq = 0
+            stoi = 0
+            for i in range(hp.log.n_eval) : 
+                data = test_dataset[i]
+                noisy = torch.unsqueeze(data["noisy"].to(device),0)
+                clean = torch.unsqueeze(data["clean"].to(device),0)
+                angle = torch.unsqueeze(data["angle"].to(device),0)
+                mic_pos = torch.unsqueeze(data["mic_pos"].to(device),0)
+
+                estim  = model(noisy,angle,mic_pos).cpu().detach().numpy()
+                pesq += run_metric(estim[0],clean[0],"PESQ") 
+                stoi += run_metric(estim[0],clean[0],"STOI") 
+
+            pesq /= hp.log.n_eval
+            stoi /= hp.log.n_eval
+
+            writer.log_value(pesq,step,'PESQ')
+            writer.log_value(stoi,step,'STOI')
+
+
+
