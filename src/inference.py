@@ -8,7 +8,6 @@ import json
 
 from tqdm.auto import tqdm
 
-from DSS.src.DatasetDOA import DatasetDOA
 from ptUtils.hparams import HParam
 
 from common import run,get_model
@@ -18,7 +17,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', '-c', type=str, required=True,help="yaml for configuration")
     parser.add_argument('--default', type=str, default=None,help="default configuration")
-    parser.add_argument('--version_name', '-v', type=str, required=True, help="version of current training")
     parser.add_argument('--chkpt',type=str,required=True)
     parser.add_argument('--dir_input','-i',type=str,required=True)
     parser.add_argument('--dir_output','-o',type=str,required=True)
@@ -48,7 +46,9 @@ if __name__ == "__main__":
     model.eval()
     with torch.no_grad():
         for path in tqdm(list_input) : 
-            x,_ = rs.load(path,sr=hp.audio.sr,mono=False)
+            noisy ,_ = rs.load(path,sr=hp.audio.sr,mono=False)
+            noisy = torch.from_numpy(noisy)
+            noisy = torch.unsqueeze(noisy,0).to(device)
             name_target = path.split("/")[-1]
             id_target = name_target.split(".")[0]
 
@@ -59,29 +59,19 @@ if __name__ == "__main__":
             f_label.close()
 
             # meta data
-            n_src = json_data["n_src"]
-            pos_mic = torch.tensor(json_data["pos_mic"])
-            azimuth = torch.tensor(json_data["azimuth"])
-            elevation = torch.tensor(json_data["elevation"])
+            #n_src = json_data["n_src"]
+            n_src = 2
+            mic_pos = torch.tensor(json_data["mic_pos"])
+            mic_pos = torch.unsqueeze(mic_pos,0).to(device)
+
+            angles = torch.tensor(json_data["angles"])
 
             # select target source
-            for i in range(n_src) : 
-                idx_target = i
-                i_azimuth = azimuth[idx_target]
-                i_elevation = elevation[idx_target]
-                angle = torch.stack((i_azimuth,i_elevation),-1)
-                angle = torch.unsqueeze(angle,0)
+            for idx_target in range(n_src) : 
+                i_angle= angles[idx_target]
+                i_angle = torch.unsqueeze(i_angle,0).to(device)
 
-
-                feat = DatasetDOA.get_feature(x,angle,pos_mic,hp).to(device)
-                feat = torch.unsqueeze(feat,0)
-
-                out = model(feat)
-
-                noisy = torch.tensor(x).to(device)
-                noisy = torch.unsqueeze(noisy,0)
-
-                estim = model.output(noisy,out,hp=hp)
+                estim = model(noisy,i_angle,mic_pos)
 
                 estim = estim[0].cpu().numpy()
                 sf.write(os.path.join(args.dir_output,'{}_{}.wav'.format(id_target,idx_target)),estim,hp.audio.sr)

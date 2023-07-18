@@ -9,6 +9,7 @@ import numpy as np
 class DatasetUDSS(torch.utils.data.Dataset) : 
     def __init__(self,hp,is_train=True):
         self.hp = hp
+        self.is_train = is_train
         if is_train : 
             self.root = hp.data.train
         else :
@@ -41,6 +42,9 @@ class DatasetUDSS(torch.utils.data.Dataset) :
         data["clean"] = torch.from_numpy(clean).float()
         data["angle"] = torch.tensor(label["angles"][idx_target]).float()
         data["mic_pos"] = torch.tensor(label["mic_pos"]).float()
+
+        if self.hp.data.shake_mic_pos and self.is_train:
+            data["mic_pos"] = data["mic_pos"] + torch.rand_like(data["mic_pos"])*0.01
 
         return data
 

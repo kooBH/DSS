@@ -85,7 +85,12 @@ if __name__ == '__main__':
 
     print("INFO::Model Loaded")
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=hp.train.adam)
+    if hp.train.optimizer == 'Adam' :
+        optimizer = torch.optim.Adam(model.parameters(), lr=hp.train.Adam)
+    elif hp.train.optimizer == 'AdamW' :
+        optimizer = torch.optim.AdamW(model.parameters(), lr=hp.train.AdamW.lr)
+    else :
+        raise Exception("ERROR::Unknown optimizer : {}".format(hp.train.optimizer))
 
     if hp.scheduler.type == 'Plateau': 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,

@@ -19,3 +19,6 @@
 [submodule "src/espnet"]
 	path = src/espnet
 	url = https://github.com/kooBH/espnet.git
+[submodule "src/MTFAA"]
+	path = src/MTFAA
+	url = https://github.com/kooBH/MTFAA.git

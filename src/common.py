@@ -51,40 +51,52 @@ def get_model(hp):
     elif hp.model.type == "UDSS" : 
         model = UDSS_helper(n_fft = hp.audio.n_fft,
                             dropout=hp.model.dropout,
-                            bottleneck=hp.model.bottleneck
-        )
+                            bottleneck=hp.model.bottleneck,
+                            model_complexity = hp.model.complexity,
+                            type_encoder = hp.model.type_encoder,
+                            use_SV = hp.model.use_SV,
+                            corr = hp.model.corr,
+                            DSB = hp.model.DSB
+                            )
+    elif hp.model.type == "UDSSv2" :
+        from UDSSv2 import UDSSv2_helper
+        model = UDSSv2_helper(encoder = hp.model.encoder)
+    elif hp.model.type == "AMTFAA":
+        from MTFAA.AMTFAA import AMTFAA_helper
+        model = AMTFAA_helper(n_fft = hp.audio.n_fft,
+                              corr = hp.model.corr
+                              )
+    elif hp.model.type == "SMTFAA":
+        from MTFAA.SMTFAA import SMTFAA_helper
+        model = SMTFAA_helper(n_fft = hp.audio.n_fft,
+                              corr = hp.model.corr
+                              )
     else :
         pass
         #model = DSS(hp.model.type,n_channel=get_n_channel(hp))
     return model
 
-
-
 def run(hp,device,data,model,criterion,ret_output=False): 
-
+    
     if hp.model.type == "Attractor" :
         noisy = data["noisy"].to(device)
         target = data["clean"].to(device)
         estim = model(noisy,data["angle"].to(device),data["mic_pos"].to(device))
-    elif hp.model.type == "UDSS" :
+    else :
         noisy = data["noisy"].to(device)
         target = data["clean"].to(device)
-        estim = model(noisy,data["angle"].to(device),data["mic_pos"].to(device))
-    else :
-        feat = data['feat'].to(device)
-        target = data['clean'].to(device)
-        noisy = data["noisy"].to(device)
-
-        out = model(feat)
-
-        estim = model.output(noisy,out,hp=hp)
+        estim = model(
+            noisy,
+            data["angle"].to(device),
+            data["mic_pos"].to(device)
+        )
 
     if criterion is None : 
         return estim
     
     if hp.loss.type == "wSDRLoss" : 
         loss = criterion(estim,noisy[:,0,:],target, alpha=hp.loss.wSDRLoss.alpha)
-    if hp.loss.type == "TrunetLoss" :
+    elif hp.loss.type == "TrunetLoss" :
         loss = criterion(estim,target).to(device)
     else : 
         loss = criterion(estim,target).to(device)
