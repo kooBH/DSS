@@ -1,0 +1,106 @@
+dataset: "LRS"
+---
+model:
+  type : "MMSUNet"
+  dropout : 0.0
+  bottleneck : "None" # None, cRNN, TGRU, AATT
+  use_SV : True
+  corr : False
+  DSB : False
+  activation : "LeakyReLU" # PReLU, LeakyReLU
+  complexity : 96
+  type_norm : "InstanceNorm2d" # BatchNorm2d, InstanceNorm2d
+  type_masking : "CRM"
+  type_encoder : "Encoder"
+  type_residual : "None"
+  architecture : {
+    "encoder": {
+        "enc1": {"in_channels": 8, "out_channels": 96, "kernel_size": [7, 1], "stride": [1,1], "padding": [3,0], "activation" : "LeakyReLU", "type_norm" : "InstanceNorm2d", "dropout": 0.2},
+        "enc2": {"in_channels": 96, "out_channels": 96, "kernel_size": [1, 7], "stride": [1,1], "padding": [0,3], "activation" : "LeakyReLU", "type_norm" : "InstanceNorm2d", "dropout": 0.2},
+        "enc3": {"in_channels": 96, "out_channels": 192, "kernel_size": [7, 5], "stride": [2,2], "padding": [3,2], "activation" : "LeakyReLU", "type_norm" : "InstanceNorm2d", "dropout": 0.2},
+        "enc4": {"in_channels": 192, "out_channels": 192, "kernel_size": [7,5], "stride": [2,1], "padding": [3,2], "activation" : "LeakyReLU", "type_norm" : "InstanceNorm2d", "dropout": 0.2},
+        "enc5": {"in_channels": 192, "out_channels": 192, "kernel_size": [5,3], "stride": [2,2], "padding": [2,1], "activation" : "LeakyReLU", "type_norm" : "InstanceNorm2d", "dropout": 0.2},
+        "enc6": {"in_channels": 192, "out_channels": 192, "kernel_size": [5,3], "stride": [2,1], "padding": [2,1], "activation" : "LeakyReLU", "type_norm" : "InstanceNorm2d", "dropout": 0.2},
+        "enc7": {"in_channels": 192, "out_channels": 192, "kernel_size": [5,3], "stride": [2,2], "padding": [2,1], "activation" : "LeakyReLU", "type_norm" : "InstanceNorm2d", "dropout": 0.2},
+        "enc8": {"in_channels": 192, "out_channels": 192, "kernel_size": [5,3], "stride": [2,1], "padding": [2,1], "activation" : "LeakyReLU", "type_norm" : "InstanceNorm2d", "dropout": 0.2},
+        "enc9": {"in_channels": 192, "out_channels": 192, "kernel_size": [5,3], "stride": [2,2], "padding": [2,1], "activation" : "LeakyReLU", "type_norm" : "InstanceNorm2d", "dropout": 0.2},
+        "enc10": {"in_channels": 192,"out_channels": 128, "kernel_size": [5,3], "stride": [2,1], "padding": [2,1], "activation" : "LeakyReLU", "type_norm" : "InstanceNorm2d", "dropout": 0.2},
+    },
+    "face_encoder":{
+      "fenc1":{"in_channels": 1,"out_channels": 64, "kernel_size": [3,3], "stride": [3,1], "padding": [0,1], "activation" : "LeakyReLU", "type_norm" : "InstanceNorm2d", "dropout": 0.0},
+      "fenc2":{"in_channels": 64,"out_channels": 64, "kernel_size": [3,3], "stride": [3,2], "padding": [0,1], "activation" : "LeakyReLU", "type_norm" : "InstanceNorm2d", "dropout": 0.0},
+      "fenc3":{"in_channels": 64,"out_channels": 64, "kernel_size": [3,3], "stride": [3,2], "padding": [0,1], "activation" : "LeakyReLU", "type_norm" : "InstanceNorm2d", "dropout": 0.0},
+      "fenc4":{"in_channels": 64,"out_channels": 64, "kernel_size": [3,3], "stride": [3,2], "padding": [0,1], "activation" : "LeakyReLU", "type_norm" : "InstanceNorm2d", "dropout": 0.0},
+      "fenc5":{"in_channels": 64,"out_channels": 128, "kernel_size": [3,3], "stride": [3,2], "padding": [0,1], "activation" : "LeakyReLU", "type_norm" : "InstanceNorm2d", "dropout": 0.0}
+
+    }
+    ,
+    "decoder": {
+        "dec10": {"in_channels": 256, "out_channels": 192, "kernel_size":[5,3], "stride": [2, 1], "padding": [2, 1], output_padding:[0,0], "activation" : "LeakyReLU", "type_norm" : "InstanceNorm2d"},
+        "dec9": {"in_channels": 384, "out_channels": 192, "kernel_size": [5,3], "stride": [2, 2], "padding": [2,1], output_padding:[0,1], "activation" : "LeakyReLU", "type_norm" : "InstanceNorm2d"},
+        "dec8": {"in_channels": 384, "out_channels": 192, "kernel_size": [5,3], "stride": [2, 1], "padding": [2,1], output_padding:[0,0], "activation" : "LeakyReLU", "type_norm" : "InstanceNorm2d"},
+        "dec7": {"in_channels": 384, "out_channels": 192, "kernel_size": [5,3], "stride": [2, 2], "padding": [2,1], output_padding:[0,1], "activation" : "LeakyReLU", "type_norm" : "InstanceNorm2d"},
+        "dec6": {"in_channels": 384, "out_channels": 192, "kernel_size": [5,3], "stride": [2, 1], "padding": [2,1], output_padding:[0,0], "activation" : "LeakyReLU", "type_norm" : "InstanceNorm2d"},
+        "dec5": {"in_channels": 384, "out_channels": 192, "kernel_size": [5,3], "stride": [2, 2], "padding": [2,1], output_padding:[0,1], "activation" : "LeakyReLU", "type_norm" : "InstanceNorm2d"},
+        "dec4": {"in_channels": 384, "out_channels": 192, "kernel_size": [7,5], "stride": [2, 1], "padding": [3,2], output_padding:[0,0], "activation" : "LeakyReLU", "type_norm" : "InstanceNorm2d"},
+        "dec3": {"in_channels": 384, "out_channels": 192, "kernel_size": [7,5], "stride": [2, 2], "padding": [3,2], output_padding:[0,1], "activation" : "LeakyReLU", "type_norm" : "InstanceNorm2d"},
+        "dec2": {"in_channels": 288, "out_channels": 192, "kernel_size": [1,7], "stride": [1, 1], "padding": [0, 3], output_padding:[0,0], "activation" : "LeakyReLU", "type_norm" : "InstanceNorm2d"},
+        "dec1": {"in_channels": 288, "out_channels": 192, "kernel_size": [7,1], "stride": [1, 1], "padding": [3,0], output_padding:[0,0], "activation" : "LeakyReLU", "type_norm" : "InstanceNorm2d"},
+    }
+  }
+
+---
+train:
+  epoch: 50
+  batch_size: 8
+  num_workers: 8
+  optimizer: 'AdamW'
+  Adam: 0.0001
+  adabound:
+    initial: 0.001
+    final: 0.05
+  AdamW:
+    lr : 0.001
+  frame_num: 128
+  summary_interval: 100
+  validation_interval: 100
+  checkpoint_interval: 1000
+---
+scheduler: # Plateau, oneCycle, CosineAnnealingLR
+  type: 'Plateau'
+  oneCycle:
+    max_lr: 0.0001
+  Plateau:
+    mode: 'min'
+    patience: 2
+    factor: 0.5
+    min_lr: 0.000005
+  CosineAnnealingLR : 
+    T_max : 100  # Maximum number of iterations.
+    eta_min : 0.000001
+---
+data:
+  train : "/home/data2/kbh/DSS/LRS/v0/train"
+  test : "/home/data2/kbh/DSS/LRS/v0/test"
+  video_train : "/home/data2/kbh/LRS3/trainval_embedding"
+  video_test  : "/home/data2/kbh/LRS3/test_embedding"
+  shake_mic_pos : False
+---
+loss:
+  type: TrunetLoss # TrunetLoss
+  wSDRLoss :
+    alpha : 0.01
+  TrunetLoss :
+    alpha : 0.7
+---
+log:
+  root : '/home/nas/user/kbh/MMSUNet'
+  plot_spec : True
+  plot_audio : True
+  n_eval : 100
+---
+audio:
+  n_fft : 512
+  n_hop : 128
+  sr : 16000
+  n_channel : 4

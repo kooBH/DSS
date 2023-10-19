@@ -9,6 +9,7 @@ from tensorboardX import SummaryWriter
 from Datasets.DatasetDOA import DatasetDOA
 from Datasets.DatasetMIDR import DatasetMIDR
 from Datasets.DatasetUDSS import DatasetUDSS
+from Datasets.DatasetLRS import DatasetLRS
 
 from ptUtils.hparams import HParam
 from ptUtils.writer import MyWriter
@@ -30,7 +31,7 @@ if __name__ == '__main__':
     parser.add_argument('--device','-d',type=str,required=False,default="cuda:0")
     args = parser.parse_args()
 
-    hp = HParam(args.config,args.default)
+    hp = HParam(args.config,args.default,merge_except=["architecture"])
     print("INFO::Loading configuration : "+args.config)
 
     device = args.device
@@ -61,6 +62,9 @@ if __name__ == '__main__':
     elif hp.dataset == "UDSS" :
         train_dataset = DatasetUDSS(hp,is_train = True)
         test_dataset= DatasetUDSS(hp,is_train = False)
+    elif hp.dataset == "LRS" :
+        train_dataset = DatasetLRS(hp,is_train = True)
+        test_dataset= DatasetLRS(hp,is_train = False)
     else :
         raise Exception("ERROR::Unknown dataset : {}".format(hp.dataset))
 
@@ -79,7 +83,7 @@ if __name__ == '__main__':
     elif hp.loss.type == "wSDRLoss" : 
         criterion = wSDRLoss
     elif hp.loss.type == "TrunetLoss" :
-        criterion = TrunetLoss()
+        criterion = TrunetLoss(alpha=hp.loss.TrunetLoss.alpha)
     else :
         raise Exception("ERROR::Unsupported criterion : {}".format(hp.loss.type))
 
@@ -138,8 +142,6 @@ if __name__ == '__main__':
         model.eval()
         with torch.no_grad():
             test_loss =0.
-            if hp.loss.type == "TrunetLoss" :
-                criterion.clear()
             for j, (batch_data) in enumerate(test_loader):
                 estim, loss = run(hp,device,batch_data,model,criterion,ret_output=True)
                 test_loss += loss.item()
@@ -151,14 +153,6 @@ if __name__ == '__main__':
             scheduler.step(test_loss)
             
             writer.log_value(test_loss,step,'test loss : ' + hp.loss.type)
-
-            if hp.loss.type == "TrunetLoss" :
-                log_sdr = criterion.log_sdr/len(test_loader)
-                log_spc = criterion.log_spc/len(test_loader)
-                criterion.clear()
-
-                writer.log_value(log_sdr.item(),step,'sdr')
-                writer.log_value(log_spc.item(),step,'spc')
 
             log_estim = estim[0,:]
             log_clean = batch_data["clean"][0,:]

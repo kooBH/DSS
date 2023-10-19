@@ -56,7 +56,27 @@ def get_model(hp):
                             type_encoder = hp.model.type_encoder,
                             use_SV = hp.model.use_SV,
                             corr = hp.model.corr,
-                            DSB = hp.model.DSB
+                            DSB = hp.model.DSB,
+                            activation=hp.model.activation,
+                            type_norm = hp.model.type_norm,
+                            type_masking=hp.model.type_masking,
+                            )
+    elif hp.model.type == "DSUNet" : 
+        from UNet.DSUNet import DSUNet_helper
+        model = DSUNet_helper(
+                            architecture=hp.model.architecture,
+                            n_fft = hp.audio.n_fft,
+                            dropout=hp.model.dropout,
+                            bottleneck=hp.model.bottleneck,
+                            model_complexity = hp.model.complexity,
+                            use_SV = hp.model.use_SV,
+                            corr = hp.model.corr,
+                            DSB = hp.model.DSB,
+                            activation=hp.model.activation,
+                            type_norm = hp.model.type_norm,
+                            type_masking=hp.model.type_masking,
+                            type_encoder=hp.model.type_encoder,
+                            type_residual=hp.model.type_residual
                             )
     elif hp.model.type == "UDSSv2" :
         from UDSSv2 import UDSSv2_helper
@@ -71,6 +91,9 @@ def get_model(hp):
         model = SMTFAA_helper(n_fft = hp.audio.n_fft,
                               corr = hp.model.corr
                               )
+    elif hp.model.type == "MMSUNet":
+        from MM.MMSUNet import MMSUNet_helper
+        model = MMSUNet_helper(architecture=hp.model.architecture)
     else :
         pass
         #model = DSS(hp.model.type,n_channel=get_n_channel(hp))
@@ -82,6 +105,16 @@ def run(hp,device,data,model,criterion,ret_output=False):
         noisy = data["noisy"].to(device)
         target = data["clean"].to(device)
         estim = model(noisy,data["angle"].to(device),data["mic_pos"].to(device))
+    elif hp.model.type == "MMSUNet" :
+        noisy = data["noisy"].to(device)
+        target = data["clean"].to(device)
+        face = data["face"].to(device)
+        estim = model(
+            noisy,
+            data["angle"].to(device),
+            data["mic_pos"].to(device),
+            face
+        )
     else :
         noisy = data["noisy"].to(device)
         target = data["clean"].to(device)
