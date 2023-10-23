@@ -18,7 +18,7 @@ class DatasetLRS(torch.utils.data.Dataset) :
             self.root_vid = hp.data.video_test
         self.list_data = glob(os.path.join(self.root,"noisy","*.wav"))
         print("DatasetLRS[train:{}] : {}".format(is_train,len(self.list_data)))
-        
+
     def __getitem__(self,idx):
         path_noisy = self.list_data[idx]
         name = path_noisy.split("/")[-1]
@@ -58,7 +58,7 @@ class DatasetLRS(torch.utils.data.Dataset) :
             len_face = int((640/80000)*(label["len_speech"][idx_target] - label["idx_speech"][idx_target]))
 
         plate_face = torch.zeros(1,512,640)
-        feat_face =  F.upsample(feat_face,size=len_face, mode='nearest')
+        feat_face =  F.interpolate(feat_face,size=len_face, mode='nearest')
         plate_face[:,:,idx_face:idx_face+len_face] = feat_face[:,:,:]
         
 

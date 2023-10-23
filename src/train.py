@@ -178,8 +178,9 @@ if __name__ == '__main__':
                 clean = torch.unsqueeze(data["clean"].to(device),0)
                 angle = torch.unsqueeze(data["angle"].to(device),0)
                 mic_pos = torch.unsqueeze(data["mic_pos"].to(device),0)
+                face = torch.unsqueeze(data["face"].to(device),0)
 
-                estim  = model(noisy,angle,mic_pos).cpu().detach().numpy()
+                estim  = model(noisy,angle,mic_pos,face).cpu().detach().numpy()
                 pesq += run_metric(estim[0],clean[0],"PESQ") 
                 stoi += run_metric(estim[0],clean[0],"STOI") 
 

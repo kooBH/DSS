@@ -1,7 +1,10 @@
+# based on v42 of DSUNet
+
 dataset: "LRS"
 ---
 model:
   type : "MMSUNet"
+  use_face : True
   dropout : 0.0
   bottleneck : "None" # None, cRNN, TGRU, AATT
   use_SV : True

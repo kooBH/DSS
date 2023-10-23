@@ -93,7 +93,7 @@ def get_model(hp):
                               )
     elif hp.model.type == "MMSUNet":
         from MM.MMSUNet import MMSUNet_helper
-        model = MMSUNet_helper(architecture=hp.model.architecture)
+        model = MMSUNet_helper(architecture=hp.model.architecture,use_face = hp.model.use_face)
     else :
         pass
         #model = DSS(hp.model.type,n_channel=get_n_channel(hp))
@@ -138,3 +138,4 @@ def run(hp,device,data,model,criterion,ret_output=False):
         return estim, loss
     else : 
         return loss
+    

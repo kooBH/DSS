@@ -469,6 +469,7 @@ class MMSUNet(nn.Module):
                  architecture,
                  input_channels=8,
                  n_fft=512,
+                 use_face = True,
                  #model_complexity=45,
                  model_complexity=45,
                  bottleneck="None",
@@ -486,6 +487,7 @@ class MMSUNet(nn.Module):
 
         self.n_channel = input_channels
         n_angle = 2
+        self.use_face = use_face
 
         print("MMSUNet::complexity {}".format(model_complexity))
 
@@ -509,12 +511,14 @@ class MMSUNet(nn.Module):
             self.add_module("encoder{}".format(i), module)
             self.encoders.append(module)
 
-        ## Facial feature encoder
-        self.face_encoders = []
-        for i in range(len(architecture["face_encoder"])) : 
-            module = Encoder(**architecture["face_encoder"]["fenc{}".format(i+1)])
-            self.add_module("face_encoder{}".format(i), module)
-            self.face_encoders.append(module)
+        if use_face :
+            ## Facial feature encoder
+            self.face_encoders = []
+            for i in range(len(architecture["face_encoder"])) : 
+                module = Encoder(**architecture["face_encoder"]["fenc{}".format(i+1)])
+                self.add_module("face_encoder{}".format(i), module)
+                self.face_encoders.append(module)
+            self.face_encoders = nn.ModuleList(self.face_encoders)
 
 
 
@@ -585,7 +589,6 @@ class MMSUNet(nn.Module):
 
         self.decoders = nn.ModuleList(self.decoders)
         self.encoders = nn.ModuleList(self.encoders)
-        self.face_encoders = nn.ModuleList(self.face_encoders)
         self.attractors = nn.ModuleList(self.attractEncoders)
         self.res= nn.ModuleList(self.res)
 
@@ -612,15 +615,16 @@ class MMSUNet(nn.Module):
             sf = a_s*sf
         # sf_skip : sf0=input sf1 ... sf9
 
-        # Facial feature encoder
-        for i, encoder in enumerate(self.face_encoders):
-            face = encoder(face)
 
-        #print("fully encoded ",sf.shape)
-        p = torch.cat((sf,face),dim=1)
+        # Facial feature encoder
+        if self.use_face : 
+            for i, encoder in enumerate(self.face_encoders):
+                face = encoder(face)
+            p = torch.cat((sf,face),dim=1)
+        else :
+            p = sf
 
         # Bottleneck
-
         if self.bottleneck == "RNN_AS" or self.bottleneck == "AATT": 
             p = self.BTN(p,attract)
         else : 
@@ -650,6 +654,7 @@ class MMSUNet_helper(nn.Module):
                  architecture,
                  n_fft = 512,
                  dropout = 0.0,
+                 use_face = True,
                  bottleneck = "None",
                  model_complexity = 45,
                  use_SV = True,
@@ -683,6 +688,7 @@ class MMSUNet_helper(nn.Module):
         self.net = MMSUNet(
                         architecture=architecture,
                         input_channels = model_channel,
+                        use_face = use_face,
                         dropout = dropout,
                         bottleneck=bottleneck,
                         model_complexity=model_complexity,
