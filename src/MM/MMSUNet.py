@@ -6,6 +6,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+try : 
+    from .lipfeat import LipNet
+except ImportError:
+    from lipfeat import LipNet
 
 
 class Attractor(nn.Module) :
@@ -461,6 +465,38 @@ class CMEA(nn.Module):
         real = mag * mag_mask.sigmoid() * torch.cos(pha+pha_mask)
         imag = mag * mag_mask.sigmoid() * torch.sin(pha+pha_mask)
         return torch.stack([real, imag], dim=-1)
+    
+class fusion_cat(nn.Module):
+    def __init__(self):
+        super(fusion_cat,self).__init__()
+    
+    def forward(self,spec,face):
+        return torch.cat([spec,face],dim=1)
+    
+class fusion_att(nn.Module):
+    def __init__(self,embed_dim, num_heads=8):
+        super(fusion_att,self).__init__()
+        self.att = nn.MultiheadAttention(embed_dim,num_heads)
+    
+    def forward(self,spec,face):
+
+        # B, C, F', T'
+        B,C,F,T = spec.shape
+
+        # B*T, C*F
+        spec = spec.permute(0,3,1,2)
+        face = face.permute(0,3,1,2)
+
+        spec = spec.reshape(B*T,C*F)
+        face = face.reshape(B*T,C*F)
+
+
+        y,_ = self.att(spec,face,spec)
+
+        y = y.reshape(B,T,C,F)
+        y = y.permute(0,2,3,1)
+
+        return y
 
 
 
@@ -479,7 +515,8 @@ class MMSUNet(nn.Module):
                  dropout=0.0,
                  type_norm = "BatcNorm2d",
                  type_encoder = "Encoder",
-                 type_residual = "None"
+                 type_residual = "None",
+                 type_fusion = "cat"
                  ):
         super().__init__()
 
@@ -520,6 +557,7 @@ class MMSUNet(nn.Module):
                 self.face_encoders.append(module)
             self.face_encoders = nn.ModuleList(self.face_encoders)
 
+        
 
 
         ## Decoder
@@ -542,6 +580,13 @@ class MMSUNet(nn.Module):
             self.BTN = TGRUBlock(128,128,128)
         else :
             self.BTN = nn.Identity()
+
+        if type_fusion == "cat" :
+            self.fusion = fusion_cat()
+        elif type_fusion == "att" :
+            self.fusion = fusion_att(architecture["fusion"]["embed_dim"],architecture["fusion"]["num_heads"])
+        else : 
+            self.fusion = nn.Identity()
 
         # Reisuadl Connection
         self.res = []
@@ -592,6 +637,8 @@ class MMSUNet(nn.Module):
         self.attractors = nn.ModuleList(self.attractEncoders)
         self.res= nn.ModuleList(self.res)
 
+        #self.lip = LipNet()
+
     def forward(self, sf,SV,theta,face):        
         # ipnut : [ Batch Channel Freq Time 2]
 
@@ -615,12 +662,12 @@ class MMSUNet(nn.Module):
             sf = a_s*sf
         # sf_skip : sf0=input sf1 ... sf9
 
-
+        #face = self.lip(face)
         # Facial feature encoder
         if self.use_face : 
             for i, encoder in enumerate(self.face_encoders):
                 face = encoder(face)
-            p = torch.cat((sf,face),dim=1)
+            p = self.fusion(sf,face)
         else :
             p = sf
 
@@ -665,7 +712,8 @@ class MMSUNet_helper(nn.Module):
                  type_norm ="BatchNorm2d",
                  type_masking="CRM",
                  type_encoder = "Encoder",
-                 type_residual = "None"
+                 type_residual = "None",
+                 type_fusion = "cat"
                  ):
         super(MMSUNet_helper,self).__init__()
 
@@ -696,7 +744,8 @@ class MMSUNet_helper(nn.Module):
                         type_norm = type_norm,
                         type_masking=type_masking,
                         type_encoder=type_encoder,
-                        type_residual=type_residual
+                        type_residual=type_residual,
+                        type_fusion = type_fusion
                         )
         
         # const

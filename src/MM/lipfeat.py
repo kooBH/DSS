@@ -197,6 +197,9 @@ class LipNet(nn.Module):
         x = self.trunk(x)
 
         x = x.view(B, Tnew, x.size(1))
+        # B,T,F
+        x = torch.permute(x,(0,2,1))
+        x = torch.unsqueeze(x, 1)
 
         return x
     

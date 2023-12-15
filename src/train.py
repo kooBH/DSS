@@ -42,6 +42,8 @@ if __name__ == '__main__':
     num_epochs = hp.train.epoch
     num_workers = hp.train.num_workers
 
+    print("INFO::Batch size : {}".format(batch_size))
+
     best_loss = 1e7
 
     ## load

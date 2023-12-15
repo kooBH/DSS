@@ -44,9 +44,13 @@ class DatasetLRS(torch.utils.data.Dataset) :
         n_frame = label["n_frames"][idx_target]
         path_vid = os.path.join(self.root_vid,cls_vid,id_vid+".npz")
         feat_face = torch.from_numpy(np.load(path_vid)["data"]).float()
-        feat_face = feat_face[:,:n_frame,:] 
+        feat_face = feat_face[:n_frame,:,:] 
+        
         
         feat_face = torch.permute(feat_face,(0,2,1))
+
+        # T,W,D -> W,D,T to stretch
+        #feat_face = torch.permute(feat_face,(1,2,0))
 
         # Stretch facial feature,
         # set all 0 to non-speech frames.
@@ -58,9 +62,17 @@ class DatasetLRS(torch.utils.data.Dataset) :
             len_face = int((640/80000)*(label["len_speech"][idx_target] - label["idx_speech"][idx_target]))
 
         plate_face = torch.zeros(1,512,640)
+        #plate_face = torch.zeros(1,112,112,640)
+
         feat_face =  F.interpolate(feat_face,size=len_face, mode='nearest')
+
         plate_face[:,:,idx_face:idx_face+len_face] = feat_face[:,:,:]
+        #plate_face[:,:,:,idx_face:idx_face+len_face] = feat_face[:,:,:]
+        # C,W,D,T
+
         
+        # plate_fate -> C,T,W,D
+        #plate_face = torch.permute(plate_face,(0,3,1,2))
 
         # Label
         data={}
@@ -68,7 +80,7 @@ class DatasetLRS(torch.utils.data.Dataset) :
         data["clean"] = torch.from_numpy(clean).float()
         data["angle"] = torch.tensor(label["angles"][idx_target]).float()
         data["mic_pos"] = torch.tensor(label["mic_pos"]).float()
-        data["face"] = plate_face
+        data["face"] = plate_face.float()
 
         if self.hp.data.shake_mic_pos and self.is_train:
             data["mic_pos"] = data["mic_pos"] + torch.rand_like(data["mic_pos"])*0.01
