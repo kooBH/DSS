@@ -73,7 +73,19 @@ class LipExtractor:
             threshold=0.8,
             model=RetinaFacePredictor.get_model(model_name),
         )
-        self.landmark_detector = FANPredictor(device=device, model=None)
+
+        # https://github.com/hhj1897/face_alignment/tree/master
+
+        """
+        2024.01.25
+        Due to 
+            Program aborted due to an unhandled Error :
+            Unable to find target for this triple (no targets are registered)[2]    3056562 abort (core dumped) 
+        Error, Disabled JIT for landmark detector
+        """
+        config = FANPredictor.create_config()
+        config.use_jit = False
+        self.landmark_detector = FANPredictor(device=device, model=None,config = config)
 
     def __call__(self, frames):
         landmarks = self.extract_landmarks(frames)
@@ -86,15 +98,14 @@ class LipExtractor:
     def extract_landmarks(self, video_frames):
         landmarks = []
         for i,frame in enumerate(video_frames):
-            print(i)
             #if len(frame.shape) == 2:
             #    frame = np.expand_dims(frame, axis=-1)
             detected_faces = self.face_detector(frame, rgb=False)
             #print("detected_faces : ", detected_faces)
-            face_points, _ = self.landmark_detector(frame, detected_faces, rgb=True)
             if len(detected_faces) == 0:
                 landmarks.append(None)
             else:
+                face_points, _ = self.landmark_detector(frame, detected_faces, rgb=True)
                 max_id, max_size = 0, 0
                 for idx, bbox in enumerate(detected_faces):
                     bbox_size = (bbox[2] - bbox[0]) + (bbox[3] - bbox[1])
